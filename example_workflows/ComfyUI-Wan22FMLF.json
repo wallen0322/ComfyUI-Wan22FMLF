@@ -738,7 +738,8 @@
           "widget_ue_connectable": {},
           "version": "7.0.1"
         }
-      }
+      },
+      "widgets_values": []
     },
     {
       "id": 27,
@@ -1356,110 +1357,6 @@
       ],
       "color": "#232",
       "bgcolor": "#353"
-    },
-    {
-      "id": 43,
-      "type": "WanFirstMiddleLastFrameToVideo",
-      "pos": [
-        3494.222977222398,
-        576.1815312226191
-      ],
-      "size": [
-        353.0005859375,
-        338
-      ],
-      "flags": {},
-      "order": 29,
-      "mode": 0,
-      "inputs": [
-        {
-          "name": "positive",
-          "type": "CONDITIONING",
-          "link": 67
-        },
-        {
-          "name": "negative",
-          "type": "CONDITIONING",
-          "link": 68
-        },
-        {
-          "name": "vae",
-          "type": "VAE",
-          "link": 69
-        },
-        {
-          "name": "start_image",
-          "shape": 7,
-          "type": "IMAGE",
-          "link": 70
-        },
-        {
-          "name": "middle_image",
-          "shape": 7,
-          "type": "IMAGE",
-          "link": 71
-        },
-        {
-          "name": "end_image",
-          "shape": 7,
-          "type": "IMAGE",
-          "link": 72
-        },
-        {
-          "name": "clip_vision_start_image",
-          "shape": 7,
-          "type": "CLIP_VISION_OUTPUT",
-          "link": null
-        },
-        {
-          "name": "clip_vision_middle_image",
-          "shape": 7,
-          "type": "CLIP_VISION_OUTPUT",
-          "link": null
-        },
-        {
-          "name": "clip_vision_end_image",
-          "shape": 7,
-          "type": "CLIP_VISION_OUTPUT",
-          "link": null
-        }
-      ],
-      "outputs": [
-        {
-          "name": "positive",
-          "type": "CONDITIONING",
-          "links": [
-            54,
-            60
-          ]
-        },
-        {
-          "name": "negative",
-          "type": "CONDITIONING",
-          "links": [
-            55,
-            61
-          ]
-        },
-        {
-          "name": "latent",
-          "type": "LATENT",
-          "links": [
-            56
-          ]
-        }
-      ],
-      "properties": {
-        "Node name for S&R": "WanFirstMiddleLastFrameToVideo"
-      },
-      "widgets_values": [
-        480,
-        832,
-        81,
-        1,
-        0.5,
-        0
-      ]
     },
     {
       "id": 44,
@@ -2312,6 +2209,110 @@
         0.5,
         2
       ]
+    },
+    {
+      "id": 43,
+      "type": "WanFirstMiddleLastFrameToVideo",
+      "pos": [
+        3494.222977222398,
+        576.1815312226191
+      ],
+      "size": [
+        353.0005859375,
+        338
+      ],
+      "flags": {},
+      "order": 29,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "positive",
+          "type": "CONDITIONING",
+          "link": 67
+        },
+        {
+          "name": "negative",
+          "type": "CONDITIONING",
+          "link": 68
+        },
+        {
+          "name": "vae",
+          "type": "VAE",
+          "link": 69
+        },
+        {
+          "name": "start_image",
+          "shape": 7,
+          "type": "IMAGE",
+          "link": 70
+        },
+        {
+          "name": "middle_image",
+          "shape": 7,
+          "type": "IMAGE",
+          "link": 71
+        },
+        {
+          "name": "end_image",
+          "shape": 7,
+          "type": "IMAGE",
+          "link": 72
+        },
+        {
+          "name": "clip_vision_start_image",
+          "shape": 7,
+          "type": "CLIP_VISION_OUTPUT",
+          "link": null
+        },
+        {
+          "name": "clip_vision_middle_image",
+          "shape": 7,
+          "type": "CLIP_VISION_OUTPUT",
+          "link": null
+        },
+        {
+          "name": "clip_vision_end_image",
+          "shape": 7,
+          "type": "CLIP_VISION_OUTPUT",
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "name": "positive",
+          "type": "CONDITIONING",
+          "links": [
+            54,
+            60
+          ]
+        },
+        {
+          "name": "negative",
+          "type": "CONDITIONING",
+          "links": [
+            55,
+            61
+          ]
+        },
+        {
+          "name": "latent",
+          "type": "LATENT",
+          "links": [
+            56
+          ]
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "WanFirstMiddleLastFrameToVideo"
+      },
+      "widgets_values": [
+        480,
+        832,
+        81,
+        1,
+        0.5,
+        0.5
+      ]
     }
   ],
   "links": [
@@ -2795,10 +2796,10 @@
   "config": {},
   "extra": {
     "ds": {
-      "scale": 0.35049389948139237,
+      "scale": 0.8264462809917358,
       "offset": [
-        1061.4074300606985,
-        1416.26999226822
+        -2323.3917710387636,
+        -56.67752237496103
       ]
     },
     "frontendVersion": "1.28.7",
