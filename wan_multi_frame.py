@@ -38,6 +38,15 @@ class WanMultiFrameRefToVideo:
                 "length": ("INT", {"default": 81, "min": 1, "max": MAX_RESOLUTION, "step": 4}),
                 "batch_size": ("INT", {"default": 1, "min": 1, "max": 4096}),
                 "ref_images": ("IMAGE",),
+                # 🎨 新增: 占位颜色可调节
+                "placeholder_gray_level": ("FLOAT", {
+                    "default": 0.5,
+                    "min": 0.0,
+                    "max": 1.0,
+                    "step": 0.05,
+                    "display": "slider",
+                    "tooltip": "Gray level for placeholder. 0.0=black, 0.5=gray, 1.0=white"
+                }),
             },
             "optional": {
                 "ref_positions": ("STRING", {
@@ -71,12 +80,12 @@ class WanMultiFrameRefToVideo:
     DESCRIPTION = "Generate video with multiple reference frames at flexible positions."
 
     def generate(self, positive, negative, vae, width, height, length, batch_size,
-                 ref_images, ref_positions="", ref_strength=0.5, fade_frames=2, clip_vision_output=None):
+                 ref_images, placeholder_gray_level=0.5, ref_positions="", ref_strength=0.5, fade_frames=2, clip_vision_output=None):
         
         # Get VAE parameters
         spacial_scale = vae.spacial_compression_encode()
         latent_channels = vae.latent_channels
-        latent_t = ((length - 1) // 4) + 1
+        latent_t = ((length - 1) // 4) + 1  # 🔑 VAE时间压缩比 4:1
         
         device = comfy.model_management.intermediate_device()
         
@@ -85,6 +94,8 @@ class WanMultiFrameRefToVideo:
                              height // spacial_scale, width // spacial_scale], 
                              device=device)
         
+        print(f"📐 Video: {length} frames → Latent: {latent_t} frames (4:1 compression)")
+        
         # Process reference images
         imgs = self._resize_images(ref_images, width, height, device)
         n_imgs = imgs.shape[0]
@@ -92,13 +103,26 @@ class WanMultiFrameRefToVideo:
         # Parse positions
         positions = self._parse_positions(ref_positions, n_imgs, length)
         
-        # Create timeline and mask
-        image = torch.ones((length, height, width, 3), device=device) * 0.5
+        # 🧮 智能对齐算法: 确保所有位置对齐到latent边界
+        def align_position(pos, total_frames):
+            """确保对齐到latent边界(4的倍数)"""
+            latent_idx = pos // 4
+            aligned_pos = latent_idx * 4
+            aligned_pos = max(0, min(aligned_pos, total_frames - 1))
+            return aligned_pos
+        
+        aligned_positions = [align_position(int(p), length) for p in positions]
+        
+        # Create timeline and mask (使用可调节灰度)
+        image = torch.ones((length, height, width, 3), device=device) * placeholder_gray_level
         mask = torch.ones((1, 1, latent_t * 4, latent.shape[-2], latent.shape[-1]), 
                          device=device)
         
+        print(f"🔧 Aligned positions: {aligned_positions}")
+        print(f"🎨 Placeholder gray level: {placeholder_gray_level:.2f}")
+        
         # Place reference images
-        for i, pos in enumerate(positions):
+        for i, pos in enumerate(aligned_positions):
             frame_idx = int(pos)
             image[frame_idx:frame_idx + 1] = imgs[i]
             
