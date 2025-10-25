@@ -76,7 +76,7 @@ class WanFirstMiddleLastFrameToVideo:
         # Get VAE parameters
         spacial_scale = vae.spacial_compression_encode()
         latent_channels = vae.latent_channels
-        latent_t = ((length - 1) // 4) + 1
+        latent_t = ((length - 1) // 4) + 1  # 🔑 VAE时间压缩比 4:1
         
         device = comfy.model_management.intermediate_device()
         
@@ -84,6 +84,8 @@ class WanFirstMiddleLastFrameToVideo:
         latent = torch.zeros([batch_size, latent_channels, latent_t, 
                              height // spacial_scale, width // spacial_scale], 
                              device=device)
+        
+        print(f"📐 Video: {length} frames → Latent: {latent_t} frames (4:1 compression)")
         
         # Resize images
         if start_image is not None:
@@ -106,9 +108,20 @@ class WanFirstMiddleLastFrameToVideo:
         mask = torch.ones((1, 1, latent_t * 4, latent.shape[-2], latent.shape[-1]), 
                          device=device)
         
-        # Calculate middle frame position
-        middle_idx = int(length * middle_frame_ratio)
-        middle_idx = max(1, min(middle_idx, length - 2))
+        # 🧮 智能对齐算法
+        def calculate_aligned_position(ratio, total_frames):
+            """确保对齐到latent边界(4的倍数)"""
+            desired_pixel_idx = int(total_frames * ratio)
+            latent_idx = desired_pixel_idx // 4
+            aligned_pixel_idx = latent_idx * 4
+            aligned_pixel_idx = max(0, min(aligned_pixel_idx, total_frames - 1))
+            return aligned_pixel_idx, latent_idx
+        
+        # Calculate middle frame position with alignment
+        middle_idx, middle_latent_idx = calculate_aligned_position(middle_frame_ratio, length)
+        middle_idx = max(4, min(middle_idx, length - 5))  # Ensure space between frames
+        
+        print(f"🔧 Alignment: start[0], middle[{middle_idx}→latent{middle_latent_idx}], end[{length-1}]")
         
         # Place reference frames
         if start_image is not None:
@@ -125,7 +138,7 @@ class WanFirstMiddleLastFrameToVideo:
             image[-end_image.shape[0]:] = end_image
             mask[:, :, -end_image.shape[0]:] = 0.0
         
-        print(f"📌 Reference frames: start at 0, middle at {middle_idx} (strength={middle_frame_strength:.2f}), end at {length-1}")
+        print(f"📌 Reference: start at 0, middle at {middle_idx} (strength={middle_frame_strength:.2f}), end at {length-1}")
         
         # Encode timeline
         concat_latent_image = vae.encode(image[:, :, :, :3])
