@@ -28,7 +28,7 @@ Documentation = "https://github.com/wallen0322/ComfyUI-Wan22FMLF/wiki"
 "Bug Tracker" = "https://github.com/wallen0322/ComfyUI-Wan22FMLF/issues"
 
 [tool.comfy]
-PublisherId = ""
+PublisherId = "wallen"
 DisplayName = "ComfyUI-Wan22FMLF"
 Icon = ""
 includes = [] 
