@@ -119,18 +119,39 @@ class WanMultiFrameRefToVideo:
             
 
         
-        concat_latent_image = vae.encode(image[:, :, :, :3])
+        # 🎯 分离高噪和低噪的latent图像
+        # 高噪声阶段：包含所有帧
+        concat_latent_image_high = vae.encode(image[:, :, :, :3])
+        
+        # 低噪声阶段：如果强度为0则跳过所有中间帧
+        if ref_strength_low == 0.0:
+            # 🎯 低噪强度为0：创建只包含首尾帧的latent
+            image_low_only = torch.ones((length, height, width, 3), device=device) * 0.5
+            
+            # 只放置首帧和末帧
+            if n_imgs >= 1:
+                frame_idx_first = int(aligned_positions[0])
+                image_low_only[frame_idx_first:frame_idx_first + 1] = imgs[0]
+            
+            if n_imgs >= 2:
+                frame_idx_last = int(aligned_positions[-1])
+                image_low_only[frame_idx_last:frame_idx_last + 1] = imgs[-1]
+            
+            concat_latent_image_low = vae.encode(image_low_only[:, :, :, :3])
+        else:
+            # 低噪强度>0：使用完整图像
+            concat_latent_image_low = vae.encode(image[:, :, :, :3])
         
         mask_high_reshaped = mask_high_noise.view(1, mask_high_noise.shape[2] // 4, 4, mask_high_noise.shape[3], mask_high_noise.shape[4]).transpose(1, 2)
         mask_low_reshaped = mask_low_noise.view(1, mask_low_noise.shape[2] // 4, 4, mask_low_noise.shape[3], mask_low_noise.shape[4]).transpose(1, 2)
         
         positive_high_noise = node_helpers.conditioning_set_values(positive, {
-            "concat_latent_image": concat_latent_image,
+            "concat_latent_image": concat_latent_image_high,
             "concat_mask": mask_high_reshaped
         })
         
         positive_low_noise = node_helpers.conditioning_set_values(positive, {
-            "concat_latent_image": concat_latent_image,
+            "concat_latent_image": concat_latent_image_low,  # 🎯 分离的latent图像
             "concat_mask": mask_low_reshaped
         })
         
