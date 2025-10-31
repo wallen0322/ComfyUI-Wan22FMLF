@@ -2,7 +2,7 @@
   "id": "017cb0d0-dfac-477e-b1f2-e58f1937fc61",
   "revision": 0,
   "last_node_id": 72,
-  "last_link_id": 192,
+  "last_link_id": 194,
   "nodes": [
     {
       "id": 2,
@@ -16,7 +16,7 @@
         46
       ],
       "flags": {},
-      "order": 38,
+      "order": 37,
       "mode": 0,
       "inputs": [
         {
@@ -130,10 +130,10 @@
       ],
       "size": [
         640,
-        1422.6666666666667
+        334
       ],
       "flags": {},
-      "order": 40,
+      "order": 39,
       "mode": 0,
       "inputs": [
         {
@@ -229,7 +229,7 @@
         781.3333333333334
       ],
       "flags": {},
-      "order": 36,
+      "order": 35,
       "mode": 0,
       "inputs": [
         {
@@ -322,7 +322,7 @@
         46
       ],
       "flags": {},
-      "order": 41,
+      "order": 38,
       "mode": 0,
       "inputs": [
         {
@@ -416,7 +416,7 @@
         781.3333333333334
       ],
       "flags": {},
-      "order": 39,
+      "order": 36,
       "mode": 0,
       "inputs": [
         {
@@ -1280,13 +1280,13 @@
         60
       ],
       "flags": {},
-      "order": 34,
+      "order": 31,
       "mode": 0,
       "inputs": [
         {
           "name": "model",
           "type": "MODEL",
-          "link": 154
+          "link": 193
         }
       ],
       "outputs": [
@@ -1370,13 +1370,13 @@
       "flags": {
         "collapsed": false
       },
-      "order": 35,
+      "order": 32,
       "mode": 0,
       "inputs": [
         {
           "name": "model",
           "type": "MODEL",
-          "link": 152
+          "link": 194
         }
       ],
       "outputs": [
@@ -1428,7 +1428,7 @@
           "name": "MODEL",
           "type": "MODEL",
           "links": [
-            151
+            194
           ]
         }
       ],
@@ -1468,7 +1468,7 @@
           "name": "MODEL",
           "type": "MODEL",
           "links": [
-            153
+            193
           ]
         }
       ],
@@ -1491,10 +1491,10 @@
       ],
       "size": [
         640,
-        1422.6666666666667
+        334
       ],
       "flags": {},
-      "order": 42,
+      "order": 40,
       "mode": 0,
       "inputs": [
         {
@@ -1577,86 +1577,6 @@
           }
         }
       }
-    },
-    {
-      "id": 68,
-      "type": "LoraLoaderModelOnly",
-      "pos": [
-        3034.79725165552,
-        333.6591444096135
-      ],
-      "size": [
-        270,
-        82
-      ],
-      "flags": {},
-      "order": 31,
-      "mode": 4,
-      "inputs": [
-        {
-          "name": "model",
-          "type": "MODEL",
-          "link": 153
-        }
-      ],
-      "outputs": [
-        {
-          "name": "MODEL",
-          "type": "MODEL",
-          "links": [
-            154
-          ]
-        }
-      ],
-      "properties": {
-        "cnr_id": "comfy-core",
-        "ver": "0.3.66",
-        "Node name for S&R": "LoraLoaderModelOnly"
-      },
-      "widgets_values": [
-        "SVI\\svi-shot.safetensors",
-        1
-      ]
-    },
-    {
-      "id": 67,
-      "type": "LoraLoaderModelOnly",
-      "pos": [
-        4319.703697110064,
-        297.5994444096135
-      ],
-      "size": [
-        270,
-        82
-      ],
-      "flags": {},
-      "order": 32,
-      "mode": 4,
-      "inputs": [
-        {
-          "name": "model",
-          "type": "MODEL",
-          "link": 151
-        }
-      ],
-      "outputs": [
-        {
-          "name": "MODEL",
-          "type": "MODEL",
-          "links": [
-            152
-          ]
-        }
-      ],
-      "properties": {
-        "cnr_id": "comfy-core",
-        "ver": "0.3.66",
-        "Node name for S&R": "LoraLoaderModelOnly"
-      },
-      "widgets_values": [
-        "SVI\\svi-shot.safetensors",
-        1
-      ]
     },
     {
       "id": 27,
@@ -2123,99 +2043,6 @@
       ]
     },
     {
-      "id": 33,
-      "type": "KSamplerAdvanced",
-      "pos": [
-        4309.61661200959,
-        541.7405237988677
-      ],
-      "size": [
-        270,
-        781.3333333333334
-      ],
-      "flags": {},
-      "order": 37,
-      "mode": 0,
-      "inputs": [
-        {
-          "name": "model",
-          "type": "MODEL",
-          "link": 53
-        },
-        {
-          "name": "positive",
-          "type": "CONDITIONING",
-          "link": 182
-        },
-        {
-          "name": "negative",
-          "type": "CONDITIONING",
-          "link": 184
-        },
-        {
-          "name": "latent_image",
-          "type": "LATENT",
-          "link": 187
-        },
-        {
-          "name": "steps",
-          "type": "INT",
-          "widget": {
-            "name": "steps"
-          },
-          "link": 57
-        },
-        {
-          "name": "end_at_step",
-          "type": "INT",
-          "widget": {
-            "name": "end_at_step"
-          },
-          "link": 58
-        }
-      ],
-      "outputs": [
-        {
-          "name": "LATENT",
-          "type": "LATENT",
-          "links": [
-            62
-          ]
-        }
-      ],
-      "properties": {
-        "cnr_id": "comfy-core",
-        "ver": "0.3.50",
-        "Node name for S&R": "KSamplerAdvanced",
-        "ue_properties": {
-          "widget_ue_connectable": {
-            "add_noise": true,
-            "noise_seed": true,
-            "steps": true,
-            "cfg": true,
-            "sampler_name": true,
-            "scheduler": true,
-            "start_at_step": true,
-            "end_at_step": true,
-            "return_with_leftover_noise": true
-          },
-          "version": "7.0.1"
-        }
-      },
-      "widgets_values": [
-        "enable",
-        666,
-        "fixed",
-        5,
-        1,
-        "euler",
-        "simple",
-        0,
-        3,
-        "enable"
-      ]
-    },
-    {
       "id": 49,
       "type": "WanFourFrameReferenceUltimate",
       "pos": [
@@ -2342,6 +2169,99 @@
         0.11,
         "enable",
         0
+      ]
+    },
+    {
+      "id": 33,
+      "type": "KSamplerAdvanced",
+      "pos": [
+        4292.01661200959,
+        526.3405237988682
+      ],
+      "size": [
+        270,
+        781.3333333333334
+      ],
+      "flags": {},
+      "order": 34,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "model",
+          "type": "MODEL",
+          "link": 53
+        },
+        {
+          "name": "positive",
+          "type": "CONDITIONING",
+          "link": 182
+        },
+        {
+          "name": "negative",
+          "type": "CONDITIONING",
+          "link": 184
+        },
+        {
+          "name": "latent_image",
+          "type": "LATENT",
+          "link": 187
+        },
+        {
+          "name": "steps",
+          "type": "INT",
+          "widget": {
+            "name": "steps"
+          },
+          "link": 57
+        },
+        {
+          "name": "end_at_step",
+          "type": "INT",
+          "widget": {
+            "name": "end_at_step"
+          },
+          "link": 58
+        }
+      ],
+      "outputs": [
+        {
+          "name": "LATENT",
+          "type": "LATENT",
+          "links": [
+            62
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.3.50",
+        "Node name for S&R": "KSamplerAdvanced",
+        "ue_properties": {
+          "widget_ue_connectable": {
+            "add_noise": true,
+            "noise_seed": true,
+            "steps": true,
+            "cfg": true,
+            "sampler_name": true,
+            "scheduler": true,
+            "start_at_step": true,
+            "end_at_step": true,
+            "return_with_leftover_noise": true
+          },
+          "version": "7.0.1"
+        }
+      },
+      "widgets_values": [
+        "enable",
+        666,
+        "fixed",
+        5,
+        1,
+        "euler",
+        "simple",
+        0,
+        3,
+        "enable"
       ]
     }
   ],
@@ -2643,38 +2563,6 @@
       "IMAGE"
     ],
     [
-      151,
-      30,
-      0,
-      67,
-      0,
-      "MODEL"
-    ],
-    [
-      152,
-      67,
-      0,
-      31,
-      0,
-      "MODEL"
-    ],
-    [
-      153,
-      28,
-      0,
-      68,
-      0,
-      "MODEL"
-    ],
-    [
-      154,
-      68,
-      0,
-      29,
-      0,
-      "MODEL"
-    ],
-    [
       176,
       42,
       0,
@@ -2801,6 +2689,22 @@
       5,
       3,
       "LATENT"
+    ],
+    [
+      193,
+      28,
+      0,
+      29,
+      0,
+      "MODEL"
+    ],
+    [
+      194,
+      30,
+      0,
+      31,
+      0,
+      "MODEL"
     ]
   ],
   "groups": [
@@ -2847,10 +2751,10 @@
   "config": {},
   "extra": {
     "ds": {
-      "scale": 0.4665073802097333,
+      "scale": 0.7513148009015783,
       "offset": [
-        388.23798744177265,
-        464.01559490212856
+        -1326.89035411323,
+        278.0714756963099
       ]
     },
     "frontendVersion": "1.28.8",
