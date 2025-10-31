@@ -165,18 +165,39 @@ class WanFourFrameReferenceUltimate:
             mask_high_noise[:, :, frame_4_idx:frame_4_idx + 4] = 0.0
             mask_low_noise[:, :, frame_4_idx:frame_4_idx + 4] = 0.0
         
-        concat_latent_image = vae.encode(image[:, :, :, :3])
+        # 🎯 分离高噪和低噪的latent图像
+        # 高噪声阶段：包含所有帧
+        concat_latent_image_high = vae.encode(image[:, :, :, :3])
+        
+        # 低噪声阶段：如果所有中间帧强度都为0则跳过中间帧
+        frame_2_strength = frame_2_strength_low if enable_frame_2 == "enable" else 0.0
+        frame_3_strength = frame_3_strength_low if enable_frame_3 == "enable" else 0.0
+        
+        if frame_2_strength == 0.0 and frame_3_strength == 0.0:
+            # 🎯 所有中间帧强度为0：创建不含中间帧的latent
+            image_low_only = torch.ones((length, height, width, 3), device=device) * 0.5
+            
+            # 只放置frame_1和frame_4
+            if frame_1_image is not None:
+                image_low_only[:frame_1_image.shape[0]] = frame_1_image
+            if frame_4_image is not None:
+                image_low_only[frame_4_idx:frame_4_idx + frame_4_image.shape[0]] = frame_4_image
+            
+            concat_latent_image_low = vae.encode(image_low_only[:, :, :, :3])
+        else:
+            # 有中间帧强度>0：使用完整图像
+            concat_latent_image_low = vae.encode(image[:, :, :, :3])
         
         mask_high_reshaped = mask_high_noise.view(1, mask_high_noise.shape[2] // 4, 4, mask_high_noise.shape[3], mask_high_noise.shape[4]).transpose(1, 2)
         mask_low_reshaped = mask_low_noise.view(1, mask_low_noise.shape[2] // 4, 4, mask_low_noise.shape[3], mask_low_noise.shape[4]).transpose(1, 2)
         
         positive_high_noise = node_helpers.conditioning_set_values(positive, {
-            "concat_latent_image": concat_latent_image,
+            "concat_latent_image": concat_latent_image_high,
             "concat_mask": mask_high_reshaped
         })
         
         positive_low_noise = node_helpers.conditioning_set_values(positive, {
-            "concat_latent_image": concat_latent_image,
+            "concat_latent_image": concat_latent_image_low,  # 🎯 分离的latent图像
             "concat_mask": mask_low_reshaped
         })
         
