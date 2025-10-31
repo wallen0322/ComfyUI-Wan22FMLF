@@ -1,9 +1,4 @@
 # -*- coding: utf-8 -*-
-"""
-Wan First-Middle-Last Frame Node
-- Support 3-frame reference with flexible positioning
-- Adjustable strength for middle frame
-"""
 
 import torch
 import node_helpers
@@ -11,16 +6,18 @@ import comfy
 import comfy.utils
 import comfy.clip_vision
 from nodes import MAX_RESOLUTION
+from typing import Optional, Tuple, Any
 
 
 class WanFirstMiddleLastFrameToVideo:
     """
-    3-frame reference node for Wan2.2 A14B I2V.
+    3-frame reference node for Wan2.2 A14B I2V with dual MoE conditioning.
     
     Features:
     - First, middle, and last frame reference
-    - Flexible middle frame positioning
-    - Adjustable strength for middle frame constraint
+    - Dual conditioning outputs for high-noise and low-noise stages
+    - Adjustable constraint strengths for MoE dual-phase sampling
+    - Designed for LightX2V蒸馏模型（8步：4步高噪+4步低噪）
     """
 
     @classmethod
@@ -45,15 +42,23 @@ class WanFirstMiddleLastFrameToVideo:
                     "max": 1.0, 
                     "step": 0.01,
                     "display": "slider",
-                    "tooltip": "Middle frame position (0.5=center)"
                 }),
-                "middle_frame_strength": ("FLOAT", {
-                    "default": 0.5,
+                # 双阶段强度控制
+                "high_noise_strength": ("FLOAT", {
+                    "default": 0.8,
                     "min": 0.0,
                     "max": 1.0,
                     "step": 0.05,
                     "display": "slider",
-                    "tooltip": "Middle frame constraint strength. 0=no constraint, 0.5=balanced (recommended), 1=fully fixed"
+                    "tooltip": "高噪声阶段中间帧约束强度（确定动态轨迹）"
+                }),
+                "low_noise_strength": ("FLOAT", {
+                    "default": 0.2,
+                    "min": 0.0,
+                    "max": 1.0,
+                    "step": 0.05,
+                    "display": "slider",
+                    "tooltip": "低噪声阶段中间帧约束强度（防止细节闪烁）"
                 }),
                 "clip_vision_start_image": ("CLIP_VISION_OUTPUT",),
                 "clip_vision_middle_image": ("CLIP_VISION_OUTPUT",),
@@ -61,33 +66,41 @@ class WanFirstMiddleLastFrameToVideo:
             },
         }
 
-    RETURN_TYPES = ("CONDITIONING", "CONDITIONING", "LATENT")
-    RETURN_NAMES = ("positive", "negative", "latent")
+    # 🎯 三个输出：positive高噪、positive低噪、latent
+    # 负向条件使用原始输入（符合ComfyUI习惯）
+    RETURN_TYPES = ("CONDITIONING", "CONDITIONING", "CONDITIONING", "LATENT")
+    RETURN_NAMES = ("positive_high_noise", "positive_low_noise", "negative", "latent")
     FUNCTION = "generate"
     CATEGORY = "ComfyUI-Wan22FMLF/video"
-    DESCRIPTION = "Generate video with first, middle, and last frame references."
 
-    def generate(self, positive, negative, vae, width, height, length, batch_size,
-                 start_image=None, middle_image=None, end_image=None,
-                 middle_frame_ratio=0.5, middle_frame_strength=0.5,
-                 clip_vision_start_image=None, clip_vision_middle_image=None, 
-                 clip_vision_end_image=None):
+    def generate(self, positive: Tuple[Any, ...], 
+                 negative: Tuple[Any, ...],
+                 vae: Any,
+                 width: int, 
+                 height: int, 
+                 length: int, 
+                 batch_size: int,
+                 start_image: Optional[torch.Tensor] = None,
+                 middle_image: Optional[torch.Tensor] = None,
+                 end_image: Optional[torch.Tensor] = None,
+                 middle_frame_ratio: float = 0.5,
+                 high_noise_strength: float = 0.8,
+                 low_noise_strength: float = 0.2,
+                 clip_vision_start_image: Optional[Any] = None,
+                 clip_vision_middle_image: Optional[Any] = None,
+                 clip_vision_end_image: Optional[Any] = None) -> Tuple[Tuple[Any, ...], Tuple[Any, ...], Tuple[Any, ...], dict]:
         
-        # Get VAE parameters
         spacial_scale = vae.spacial_compression_encode()
         latent_channels = vae.latent_channels
-        latent_t = ((length - 1) // 4) + 1  # 🔑 VAE时间压缩比 4:1
+        latent_t = ((length - 1) // 4) + 1
         
         device = comfy.model_management.intermediate_device()
         
-        # Create empty latent
         latent = torch.zeros([batch_size, latent_channels, latent_t, 
                              height // spacial_scale, width // spacial_scale], 
                              device=device)
         
-        print(f"📐 Video: {length} frames → Latent: {latent_t} frames (4:1 compression)")
-        
-        # Resize images
+        # 图像预处理
         if start_image is not None:
             start_image = comfy.utils.common_upscale(
                 start_image[:length].movedim(-1, 1), width, height, 
@@ -103,60 +116,73 @@ class WanFirstMiddleLastFrameToVideo:
                 end_image[-length:].movedim(-1, 1), width, height, 
                 "bilinear", "center").movedim(1, -1)
         
-        # Create timeline
+        # 创建时间线和基础mask
         image = torch.ones((length, height, width, 3), device=device) * 0.5
-        mask = torch.ones((1, 1, latent_t * 4, latent.shape[-2], latent.shape[-1]), 
-                         device=device)
+        mask_base = torch.ones((1, 1, latent_t * 4, latent.shape[-2], latent.shape[-1]), 
+                              device=device)
         
-        # 🧮 智能对齐算法
-        def calculate_aligned_position(ratio, total_frames):
-            """确保对齐到latent边界(4的倍数)"""
+        def calculate_aligned_position(ratio: float, total_frames: int) -> Tuple[int, int]:
             desired_pixel_idx = int(total_frames * ratio)
             latent_idx = desired_pixel_idx // 4
             aligned_pixel_idx = latent_idx * 4
             aligned_pixel_idx = max(0, min(aligned_pixel_idx, total_frames - 1))
             return aligned_pixel_idx, latent_idx
         
-        # Calculate middle frame position with alignment
         middle_idx, middle_latent_idx = calculate_aligned_position(middle_frame_ratio, length)
-        middle_idx = max(4, min(middle_idx, length - 5))  # Ensure space between frames
+        middle_idx = max(4, min(middle_idx, length - 5))
         
-        print(f"🔧 Alignment: start[0], middle[{middle_idx}→latent{middle_latent_idx}], end[{length-1}]")
-        
-        # Place reference frames
+        # 放置参考帧
         if start_image is not None:
             image[:start_image.shape[0]] = start_image
-            mask[:, :, :start_image.shape[0] + 3] = 0.0
+            mask_base[:, :, :start_image.shape[0] + 3] = 0.0
         
         if middle_image is not None:
             image[middle_idx:middle_idx + 1] = middle_image
-            # Middle frame uses adjustable strength
-            mask_value = 1.0 - middle_frame_strength
-            mask[:, :, middle_idx:middle_idx + 4] = mask_value
+            
+            # 🎯 创建两个不同的mask
+            mask_high_noise = mask_base.clone()
+            mask_low_noise = mask_base.clone()
+            
+            # 高噪声mask（强约束）
+            start_range = max(0, middle_idx)
+            end_range = min(length, middle_idx + 4)
+            high_noise_mask_value = 1.0 - high_noise_strength
+            mask_high_noise[:, :, start_range:end_range] = high_noise_mask_value
+            
+            # 低噪声mask（弱约束）
+            low_noise_mask_value = 1.0 - low_noise_strength
+            mask_low_noise[:, :, start_range:end_range] = low_noise_mask_value
         
         if end_image is not None:
             image[-end_image.shape[0]:] = end_image
-            mask[:, :, -end_image.shape[0]:] = 0.0
+            if middle_image is not None:
+                mask_high_noise[:, :, -end_image.shape[0]:] = 0.0
+                mask_low_noise[:, :, -end_image.shape[0]:] = 0.0
         
-        print(f"📌 Reference: start at 0, middle at {middle_idx} (strength={middle_frame_strength:.2f}), end at {length-1}")
-        
-        # Encode timeline
+        # 编码
         concat_latent_image = vae.encode(image[:, :, :, :3])
         
-        # Reshape mask
-        mask = mask.view(1, mask.shape[2] // 4, 4, mask.shape[3], mask.shape[4]).transpose(1, 2)
+        # Mask重塑
+        mask_high_reshaped = mask_high_noise.view(1, mask_high_noise.shape[2] // 4, 4, mask_high_noise.shape[3], mask_high_noise.shape[4]).transpose(1, 2)
+        mask_low_reshaped = mask_low_noise.view(1, mask_low_noise.shape[2] // 4, 4, mask_low_noise.shape[3], mask_low_noise.shape[4]).transpose(1, 2)
         
-        # Set conditioning
-        positive = node_helpers.conditioning_set_values(positive, {
+        # 🎯 创建三种conditioning设置
+        # 高噪声阶段：强约束，确定动态轨迹
+        positive_high_noise = node_helpers.conditioning_set_values(positive, {
             "concat_latent_image": concat_latent_image,
-            "concat_mask": mask
-        })
-        negative = node_helpers.conditioning_set_values(negative, {
-            "concat_latent_image": concat_latent_image,
-            "concat_mask": mask
+            "concat_mask": mask_high_reshaped
         })
         
-        # CLIP Vision
+        # 低噪声阶段：弱约束，防止细节闪烁
+        positive_low_noise = node_helpers.conditioning_set_values(positive, {
+            "concat_latent_image": concat_latent_image,
+            "concat_mask": mask_low_reshaped
+        })
+        
+        # 负向条件使用原始输入
+        negative_out = negative
+        
+        # CLIP Vision处理（主要用于低噪声阶段的细节优化）
         clip_vision_output = self._merge_clip_vision_outputs(
             clip_vision_start_image, 
             clip_vision_middle_image, 
@@ -164,16 +190,15 @@ class WanFirstMiddleLastFrameToVideo:
         )
         
         if clip_vision_output is not None:
-            positive = node_helpers.conditioning_set_values(positive, 
-                                                           {"clip_vision_output": clip_vision_output})
-            negative = node_helpers.conditioning_set_values(negative, 
-                                                           {"clip_vision_output": clip_vision_output})
+            # 只在低噪声阶段添加CLIP Vision（更好的细节理解）
+            positive_low_noise = node_helpers.conditioning_set_values(positive_low_noise, 
+                                                                   {"clip_vision_output": clip_vision_output})
         
         out_latent = {"samples": latent}
-        return (positive, negative, out_latent)
+        
+        return (positive_high_noise, positive_low_noise, negative_out, out_latent)
 
-    def _merge_clip_vision_outputs(self, *outputs):
-        """Merge multiple CLIP Vision outputs."""
+    def _merge_clip_vision_outputs(self, *outputs: Any) -> Optional[Any]:
         valid_outputs = [o for o in outputs if o is not None]
         
         if not valid_outputs:
@@ -195,5 +220,5 @@ NODE_CLASS_MAPPINGS = {
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
-    "WanFirstMiddleLastFrameToVideo": "Wan First-Middle-Last Frame 🎬"
+    "WanFirstMiddleLastFrameToVideo": "Wan First-Middle-Last Frame (Dual MoE) 🎬"
 }
