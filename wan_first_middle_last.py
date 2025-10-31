@@ -131,19 +131,21 @@ class WanFirstMiddleLastFrameToVideo:
         middle_idx, middle_latent_idx = calculate_aligned_position(middle_frame_ratio, length)
         middle_idx = max(4, min(middle_idx, length - 5))
         
+        # 🎯 关键修复：提前创建mask，避免只在middle_image存在时才创建
+        mask_high_noise = mask_base.clone()
+        mask_low_noise = mask_base.clone()
+        
         # 放置参考帧
         if start_image is not None:
             image[:start_image.shape[0]] = start_image
             mask_base[:, :, :start_image.shape[0] + 3] = 0.0
+            mask_high_noise[:, :, :start_image.shape[0] + 3] = 0.0
+            mask_low_noise[:, :, :start_image.shape[0] + 3] = 0.0
         
         if middle_image is not None:
             image[middle_idx:middle_idx + 1] = middle_image
             
-            # 🎯 创建两个不同的mask
-            mask_high_noise = mask_base.clone()
-            mask_low_noise = mask_base.clone()
-            
-            # 高噪声mask（强约束）
+            # 🎯 修复：现在mask已经创建，直接设置中间帧的mask
             start_range = max(0, middle_idx)
             end_range = min(length, middle_idx + 4)
             high_noise_mask_value = 1.0 - high_noise_strength
@@ -159,8 +161,25 @@ class WanFirstMiddleLastFrameToVideo:
                 mask_high_noise[:, :, -end_image.shape[0]:] = 0.0
                 mask_low_noise[:, :, -end_image.shape[0]:] = 0.0
         
-        # 编码
-        concat_latent_image = vae.encode(image[:, :, :, :3])
+        # 🎯 分离高噪和低噪的latent图像
+        # 高噪声阶段：包含中间帧
+        concat_latent_image_high = vae.encode(image[:, :, :, :3])
+        
+        # 低噪声阶段：如果强度为0则跳过中间帧
+        if low_noise_strength == 0.0:
+            # 🎯 低噪强度为0：创建不含中间帧的latent
+            image_low_only = torch.ones((length, height, width, 3), device=device) * 0.5
+            
+            # 只放置start和end帧
+            if start_image is not None:
+                image_low_only[:start_image.shape[0]] = start_image
+            if end_image is not None:
+                image_low_only[-end_image.shape[0]:] = end_image
+            
+            concat_latent_image_low = vae.encode(image_low_only[:, :, :, :3])
+        else:
+            # 低噪强度>0：使用完整图像
+            concat_latent_image_low = vae.encode(image[:, :, :, :3])
         
         # Mask重塑
         mask_high_reshaped = mask_high_noise.view(1, mask_high_noise.shape[2] // 4, 4, mask_high_noise.shape[3], mask_high_noise.shape[4]).transpose(1, 2)
@@ -169,13 +188,13 @@ class WanFirstMiddleLastFrameToVideo:
         # 🎯 创建三种conditioning设置
         # 高噪声阶段：强约束，确定动态轨迹
         positive_high_noise = node_helpers.conditioning_set_values(positive, {
-            "concat_latent_image": concat_latent_image,
+            "concat_latent_image": concat_latent_image_high,
             "concat_mask": mask_high_reshaped
         })
         
-        # 低噪声阶段：弱约束，防止细节闪烁
+        # 低噪声阶段：根据强度决定是否使用中间帧
         positive_low_noise = node_helpers.conditioning_set_values(positive, {
-            "concat_latent_image": concat_latent_image,
+            "concat_latent_image": concat_latent_image_low,  # 🎯 分离的latent图像
             "concat_mask": mask_low_reshaped
         })
         
