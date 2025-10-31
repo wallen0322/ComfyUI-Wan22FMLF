@@ -3,6 +3,13 @@
 Multi-frame reference conditioning nodes for Wan2.2 A14B I2V models.
 
 ---
+#DONT WORRY BE HAPPY
+
+20251031重大更新
+解决中间帧闪烁问题，请使用我更新的示例工作流，节点做了较大改变！
+建议高噪中间帧强度：06-0.8，低噪中间帧强度：0.2左右
+
+（PS：这个节点起初就是为了好玩，AI随便写写，没想到挺多人喜欢，所以我今天好好优化一下）
 
 ## 🎬 Nodes
 
