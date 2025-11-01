@@ -32,5 +32,5 @@ PublisherId = "wallen"
 DisplayName = "ComfyUI-Wan22FMLF"
 Icon = ""
 includes = [] 
-# "requires-comfyui" = ">=1.0.0"  # ComfyUI version compatibility
+# "requires-comfyui" = ">=1.1.1"  # ComfyUI version compatibility
 
