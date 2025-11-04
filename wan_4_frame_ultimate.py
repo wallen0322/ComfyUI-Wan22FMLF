@@ -53,7 +53,7 @@ class WanFourFrameReferenceUltimate:
     RETURN_TYPES = ("CONDITIONING", "CONDITIONING", "CONDITIONING", "LATENT")
     RETURN_NAMES = ("positive_high_noise", "positive_low_noise", "negative", "latent")
     FUNCTION = "generate"
-    CATEGORY = "ComfyUI-Wan22FMLF/video"
+    CATEGORY = "ComfyUI-Wan22FMLF"
 
     def generate(self, positive: Tuple[Any, ...], 
                  negative: Tuple[Any, ...],
@@ -165,8 +165,8 @@ class WanFourFrameReferenceUltimate:
             mask_high_noise[:, :, frame_4_idx:frame_4_idx + 4] = 0.0
             mask_low_noise[:, :, frame_4_idx:frame_4_idx + 4] = 0.0
         
-        # 🎯 分离高噪和低噪的latent图像
-        # 高噪声阶段：包含所有帧
+        # Separate latent images for high and low noise stages
+        # High noise stage: includes all frames
         concat_latent_image_high = vae.encode(image[:, :, :, :3])
         
         # 低噪声阶段：如果所有中间帧强度都为0则跳过中间帧
@@ -174,7 +174,7 @@ class WanFourFrameReferenceUltimate:
         frame_3_strength = frame_3_strength_low if enable_frame_3 == "enable" else 0.0
         
         if frame_2_strength == 0.0 and frame_3_strength == 0.0:
-            # 🎯 所有中间帧强度为0：创建不含中间帧的latent
+            # All middle frame strengths are 0: create latent without middle frames
             image_low_only = torch.ones((length, height, width, 3), device=device) * 0.5
             
             # 只放置frame_1和frame_4
@@ -197,7 +197,7 @@ class WanFourFrameReferenceUltimate:
         })
         
         positive_low_noise = node_helpers.conditioning_set_values(positive, {
-            "concat_latent_image": concat_latent_image_low,  # 🎯 分离的latent图像
+            "concat_latent_image": concat_latent_image_low,
             "concat_mask": mask_low_reshaped
         })
         
@@ -230,4 +230,4 @@ class WanFourFrameReferenceUltimate:
 
 
 NODE_CLASS_MAPPINGS = {"WanFourFrameReferenceUltimate": WanFourFrameReferenceUltimate}
-NODE_DISPLAY_NAME_MAPPINGS = {"WanFourFrameReferenceUltimate": "Wan 4-Frame Reference (Dual MoE) 🎨"}
+NODE_DISPLAY_NAME_MAPPINGS = {"WanFourFrameReferenceUltimate": "Wan 4-Frame Reference (Dual MoE)"}
