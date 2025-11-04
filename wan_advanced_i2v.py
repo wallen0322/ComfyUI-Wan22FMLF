@@ -148,10 +148,6 @@ class WanAdvancedI2V:
                 "clip_vision_end_image": ("CLIP_VISION_OUTPUT",),
                 
                 # Mode Control
-                "use_motion_frames_mode": ("BOOLEAN", {
-                    "default": False,
-                    "tooltip": "Enable motion frames mode; disable for triple frame reference mode"
-                }),
                 "enable_middle_frame": ("BOOLEAN", {
                     "default": True,
                     "tooltip": "Enable middle frame constraint in triple frame reference mode"
@@ -193,7 +189,6 @@ class WanAdvancedI2V:
                  clip_vision_start_image: Optional[Any] = None,
                  clip_vision_middle_image: Optional[Any] = None,
                  clip_vision_end_image: Optional[Any] = None,
-                 use_motion_frames_mode: bool = False,
                  enable_middle_frame: bool = True) -> Tuple[Tuple[Any, ...], Tuple[Any, ...], Tuple[Any, ...], dict, int, int, int]:
         
         # Initialize latent space
@@ -229,27 +224,27 @@ class WanAdvancedI2V:
                 # Use as motion frames automatically
                 motion_frames = continue_frames_selected
                 num_motion_frames = motion_frames.shape[0]
-                use_motion_frames_mode = True
                 
                 # Record trim info
                 trim_image = num_motion_frames
             
             # Handle reference frame sequences with offset
             if video_frame_offset > 0:
-                # Apply offset to all reference images if they are sequences
-                if start_image is not None:
+                # Apply offset ONLY to sequences (multi-frame images)
+                # Single-frame reference images (shape[0] == 1) are kept as-is
+                if start_image is not None and start_image.shape[0] > 1:
                     if start_image.shape[0] > video_frame_offset:
                         start_image = start_image[video_frame_offset:]
                     else:
                         start_image = None  # Beyond range
                 
-                if middle_image is not None:
+                if middle_image is not None and middle_image.shape[0] > 1:
                     if middle_image.shape[0] > video_frame_offset:
                         middle_image = middle_image[video_frame_offset:]
                     else:
                         middle_image = None
                 
-                if end_image is not None:
+                if end_image is not None and end_image.shape[0] > 1:
                     if end_image.shape[0] > video_frame_offset:
                         end_image = end_image[video_frame_offset:]
                     else:
@@ -280,9 +275,15 @@ class WanAdvancedI2V:
         mask_high_noise = mask_base.clone()
         mask_low_noise = mask_base.clone()
         
-        # MODE SELECTION: Motion Frames vs Triple Frame Reference
-        if use_motion_frames_mode and motion_frames is not None and num_motion_frames > 0:
-            # Motion Frames Mode
+        # Detect if we have motion frames (auto or manual)
+        has_motion_frames = (motion_frames is not None and num_motion_frames > 0)
+        
+        # MODE SELECTION: Motion Frames / Triple Frame Reference
+        if has_motion_frames:
+            # Motion Frames Mode (manual or auto_continue)
+            # Note: start_image is ignored when motion_frames exist (motion_frames serve as start)
+            # But middle_image and end_image still work for trajectory control
+            
             motion_frames_proc = motion_frames[-num_motion_frames:]
             motion_frames_proc = comfy.utils.common_upscale(
                 motion_frames_proc.movedim(-1, 1), width, height, "area", "center"
@@ -291,17 +292,44 @@ class WanAdvancedI2V:
             image[:motion_frames_proc.shape[0]] = motion_frames_proc[:, :, :, :3]
             
             motion_latent_frames = ((motion_frames_proc.shape[0] - 1) // 4) + 1
-            mask_base[:, :, :motion_latent_frames] = 0.0
-            mask_high_noise[:, :, :motion_latent_frames] = 0.0
-            mask_low_noise[:, :, :motion_latent_frames] = 0.0
+            mask_base[:, :, :motion_latent_frames * 4] = 0.0
+            mask_high_noise[:, :, :motion_latent_frames * 4] = 0.0
+            mask_low_noise[:, :, :motion_latent_frames * 4] = 0.0
             
             # Handle overlap with prev_latent (legacy mode only)
             if not use_offset_mode and prev_latent is not None and overlap_frames > 0:
                 overlap_latent_frames = ((overlap_frames - 1) // 4) + 1
-                mask_high_noise[:, :, :overlap_latent_frames] = 0.0
-                mask_low_noise[:, :, :overlap_latent_frames] = 0.0
+                mask_high_noise[:, :, :overlap_latent_frames * 4] = 0.0
+                mask_low_noise[:, :, :overlap_latent_frames * 4] = 0.0
             
-            # Process end image if provided
+            # Process middle frame (for trajectory control)
+            if middle_image is not None and enable_middle_frame:
+                middle_image_proc = comfy.utils.common_upscale(
+                    middle_image[:1].movedim(-1, 1), width, height, 
+                    "bilinear", "center"
+                ).movedim(1, -1)
+                
+                # Calculate aligned position
+                middle_idx, middle_latent_idx = self._calculate_aligned_position(
+                    middle_frame_ratio, length
+                )
+                middle_idx = max(4, min(middle_idx, length - 5))
+                
+                image[middle_idx:middle_idx + 1] = middle_image_proc
+                
+                # Dual-phase middle frame masking with weights
+                start_range = max(0, middle_idx)
+                end_range = min(length, middle_idx + 4)
+                
+                # High noise: strong constraint for trajectory
+                high_noise_mask_value = (1.0 - high_noise_strength) * middle_frame_weight
+                mask_high_noise[:, :, start_range:end_range] = high_noise_mask_value
+                
+                # Low noise: weak constraint for detail refinement
+                low_noise_mask_value = (1.0 - low_noise_strength) * middle_frame_weight
+                mask_low_noise[:, :, start_range:end_range] = low_noise_mask_value
+            
+            # Process end image (for ending control)
             if end_image is not None:
                 end_image_proc = comfy.utils.common_upscale(
                     end_image[-length:].movedim(-1, 1), width, height, 
@@ -309,9 +337,11 @@ class WanAdvancedI2V:
                 ).movedim(1, -1)
                 image[-end_image_proc.shape[0]:] = end_image_proc[:, :, :, :3]
                 
+                # Apply weight to mask (fixed constraint for end frame)
+                end_mask_value = 1.0 - end_frame_weight
                 end_latent_frames = ((end_image_proc.shape[0] - 1) // 4) + 1
-                mask_high_noise[:, :, -end_latent_frames:] = 0.0
-                mask_low_noise[:, :, -end_latent_frames:] = 0.0
+                mask_high_noise[:, :, -end_latent_frames * 4:] = end_mask_value
+                mask_low_noise[:, :, -end_latent_frames * 4:] = end_mask_value
         
         else:
             # Triple Frame Reference Mode
@@ -323,12 +353,11 @@ class WanAdvancedI2V:
                 ).movedim(1, -1)
                 image[:start_image_proc.shape[0]] = start_image_proc[:, :, :, :3]
                 
-                # Apply weight to mask
+                # Apply weight to mask (fixed constraint for start frame)
                 start_mask_value = 1.0 - start_frame_weight
-                start_latent_frames = ((start_image_proc.shape[0] + 3 - 1) // 4) + 1
-                mask_base[:, :, :start_latent_frames] = start_mask_value
-                mask_high_noise[:, :, :start_latent_frames] = start_mask_value
-                mask_low_noise[:, :, :start_latent_frames] = start_mask_value
+                start_latent_frames = ((start_image_proc.shape[0] - 1) // 4) + 1
+                mask_high_noise[:, :, :start_latent_frames * 4] = start_mask_value
+                mask_low_noise[:, :, :start_latent_frames * 4] = start_mask_value
             
             # Process middle frame with alignment and dual-phase control
             if middle_image is not None and enable_middle_frame:
@@ -365,40 +394,34 @@ class WanAdvancedI2V:
                 ).movedim(1, -1)
                 image[-end_image_proc.shape[0]:] = end_image_proc[:, :, :, :3]
                 
-                # Apply weight to mask
+                # Apply weight to mask (fixed constraint for end frame)
                 end_mask_value = 1.0 - end_frame_weight
                 end_latent_frames = ((end_image_proc.shape[0] - 1) // 4) + 1
-                mask_high_noise[:, :, -end_latent_frames:] = end_mask_value
-                mask_low_noise[:, :, -end_latent_frames:] = end_mask_value
+                mask_high_noise[:, :, -end_latent_frames * 4:] = end_mask_value
+                mask_low_noise[:, :, -end_latent_frames * 4:] = end_mask_value
             
             # Handle overlap with prev_latent (legacy mode only)
             if not use_offset_mode and prev_latent is not None and overlap_frames > 0:
                 overlap_latent_frames = ((overlap_frames - 1) // 4) + 1
-                mask_high_noise[:, :, :overlap_latent_frames] = 0.0
-                mask_low_noise[:, :, :overlap_latent_frames] = 0.0
+                mask_high_noise[:, :, :overlap_latent_frames * 4] = 0.0
+                mask_low_noise[:, :, :overlap_latent_frames * 4] = 0.0
         
         # Create separate latent images for high and low noise stages
         # High noise stage: includes all reference frames
         concat_latent_image_high = vae.encode(image[:, :, :, :3])
         
         # Low noise stage: conditionally exclude middle frame if strength is 0
-        if low_noise_strength == 0.0 and middle_image is not None and not use_motion_frames_mode:
+        if (low_noise_strength == 0.0 and middle_image is not None and 
+            enable_middle_frame and not has_motion_frames):
             # Create image without middle frame for low noise stage
-            image_low_only = torch.ones((length, height, width, 3), device=device) * 0.5
+            # Use the already processed image and just exclude the middle frame
+            image_low_only = image.clone()
             
-            if start_image is not None:
-                start_image_proc = comfy.utils.common_upscale(
-                    start_image[:length].movedim(-1, 1), width, height, 
-                    "bilinear", "center"
-                ).movedim(1, -1)
-                image_low_only[:start_image_proc.shape[0]] = start_image_proc[:, :, :, :3]
-            
-            if end_image is not None:
-                end_image_proc = comfy.utils.common_upscale(
-                    end_image[-length:].movedim(-1, 1), width, height, 
-                    "bilinear", "center"
-                ).movedim(1, -1)
-                image_low_only[-end_image_proc.shape[0]:] = end_image_proc[:, :, :, :3]
+            # Reset middle frame area to neutral (gray)
+            middle_idx, _ = self._calculate_aligned_position(middle_frame_ratio, length)
+            middle_idx = max(4, min(middle_idx, length - 5))
+            # Fill middle frame position with neutral gray
+            image_low_only[middle_idx:middle_idx + 1] = 0.5
             
             concat_latent_image_low = vae.encode(image_low_only[:, :, :, :3])
         else:
