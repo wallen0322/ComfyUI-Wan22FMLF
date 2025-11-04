@@ -57,7 +57,7 @@ class WanMultiFrameRefToVideo:
     RETURN_TYPES = ("CONDITIONING", "CONDITIONING", "CONDITIONING", "LATENT")
     RETURN_NAMES = ("positive_high_noise", "positive_low_noise", "negative", "latent")
     FUNCTION = "generate"
-    CATEGORY = "ComfyUI-Wan22FMLF/video"
+    CATEGORY = "ComfyUI-Wan22FMLF"
 
     def generate(self, positive: Tuple[Any, ...], 
                  negative: Tuple[Any, ...],
@@ -119,13 +119,13 @@ class WanMultiFrameRefToVideo:
             
 
         
-        # 🎯 分离高噪和低噪的latent图像
-        # 高噪声阶段：包含所有帧
+        # Separate latent images for high and low noise stages
+        # High noise stage: includes all frames
         concat_latent_image_high = vae.encode(image[:, :, :, :3])
         
-        # 低噪声阶段：如果强度为0则跳过所有中间帧
+        # Low noise stage: skip all middle frames if strength is 0
         if ref_strength_low == 0.0:
-            # 🎯 低噪强度为0：创建只包含首尾帧的latent
+            # Low noise strength is 0: create latent with only first and last frames
             image_low_only = torch.ones((length, height, width, 3), device=device) * 0.5
             
             # 只放置首帧和末帧
@@ -151,7 +151,7 @@ class WanMultiFrameRefToVideo:
         })
         
         positive_low_noise = node_helpers.conditioning_set_values(positive, {
-            "concat_latent_image": concat_latent_image_low,  # 🎯 分离的latent图像
+            "concat_latent_image": concat_latent_image_low,
             "concat_mask": mask_low_reshaped
         })
         
@@ -211,4 +211,4 @@ class WanMultiFrameRefToVideo:
 
 
 NODE_CLASS_MAPPINGS = {"WanMultiFrameRefToVideo": WanMultiFrameRefToVideo}
-NODE_DISPLAY_NAME_MAPPINGS = {"WanMultiFrameRefToVideo": "Wan Multi-Frame Reference (Dual MoE) 🎭"}
+NODE_DISPLAY_NAME_MAPPINGS = {"WanMultiFrameRefToVideo": "Wan Multi-Frame Reference (Dual MoE)"}
