@@ -28,6 +28,10 @@ class WanFirstMiddleLastFrameToVideo:
                 "batch_size": ("INT", {"default": 1, "min": 1, "max": 4096}),
             },
             "optional": {
+                "mode": (["NORMAL", "SINGLE_PERSON"], {
+                    "default": "NORMAL",
+                    "tooltip": "NORMAL: full control | SINGLE_PERSON: low noise only uses start frame"
+                }),
                 "start_image": ("IMAGE",),
                 "middle_image": ("IMAGE",),
                 "end_image": ("IMAGE",),
@@ -38,13 +42,13 @@ class WanFirstMiddleLastFrameToVideo:
                     "step": 0.01,
                     "display": "slider",
                 }),
-                "high_noise_strength": ("FLOAT", {
+                "high_noise_mid_strength": ("FLOAT", {
                     "default": 0.8,
                     "min": 0.0,
                     "max": 1.0,
                     "step": 0.05,
                     "display": "slider",
-                    "tooltip": "高噪声阶段中间帧约束强度"
+                    "tooltip": "High noise middle frame constraint strength"
                 }),
                 "low_noise_start_strength": ("FLOAT", {
                     "default": 1.0,
@@ -53,12 +57,13 @@ class WanFirstMiddleLastFrameToVideo:
                     "step": 0.05,
                     "display": "slider",
                 }),
-                "low_noise_middle_strength": ("FLOAT", {
+                "low_noise_mid_strength": ("FLOAT", {
                     "default": 0.2,
                     "min": 0.0,
                     "max": 1.0,
                     "step": 0.05,
                     "display": "slider",
+                    "tooltip": "Low noise middle frame constraint strength"
                 }),
                 "low_noise_end_strength": ("FLOAT", {
                     "default": 1.0,
@@ -87,13 +92,14 @@ class WanFirstMiddleLastFrameToVideo:
         height: int,
         length: int,
         batch_size: int,
+        mode: str = "NORMAL",
         start_image: Optional[torch.Tensor] = None,
         middle_image: Optional[torch.Tensor] = None,
         end_image: Optional[torch.Tensor] = None,
         middle_frame_ratio: float = 0.5,
-        high_noise_strength: float = 0.8,
+        high_noise_mid_strength: float = 0.8,
         low_noise_start_strength: float = 1.0,
-        low_noise_middle_strength: float = 0.2,
+        low_noise_mid_strength: float = 0.2,
         low_noise_end_strength: float = 1.0,
         clip_vision_start_image: Optional[Any] = None,
         clip_vision_middle_image: Optional[Any] = None,
@@ -163,10 +169,10 @@ class WanFirstMiddleLastFrameToVideo:
             start_range = max(0, middle_idx)
             end_range = min(length, middle_idx + 4)
 
-            high_noise_mask_value = 1.0 - high_noise_strength
+            high_noise_mask_value = 1.0 - high_noise_mid_strength
             mask_high_noise[:, :, start_range:end_range] = high_noise_mask_value
 
-            low_middle_mask_value = 1.0 - low_noise_middle_strength
+            low_middle_mask_value = 1.0 - low_noise_mid_strength
             mask_low_noise[:, :, start_range:end_range] = low_middle_mask_value
 
         if end_image is not None:
@@ -178,13 +184,18 @@ class WanFirstMiddleLastFrameToVideo:
 
         concat_latent_image = vae.encode(image[:, :, :, :3])
 
-        if low_noise_start_strength == 0.0 or low_noise_middle_strength == 0.0 or low_noise_end_strength == 0.0:
+        if mode == "SINGLE_PERSON":
+            image_low_only = torch.ones((length, height, width, 3), device=device) * 0.5
+            if start_image is not None:
+                image_low_only[:start_image.shape[0]] = start_image
+            concat_latent_image_low = vae.encode(image_low_only[:, :, :, :3])
+        elif low_noise_start_strength == 0.0 or low_noise_mid_strength == 0.0 or low_noise_end_strength == 0.0:
             image_low_only = torch.ones((length, height, width, 3), device=device) * 0.5
 
             if start_image is not None and low_noise_start_strength > 0.0:
                 image_low_only[:start_image.shape[0]] = start_image
             
-            if middle_image is not None and low_noise_middle_strength > 0.0:
+            if middle_image is not None and low_noise_mid_strength > 0.0:
                 image_low_only[middle_idx:middle_idx + 1] = middle_image
             
             if end_image is not None and low_noise_end_strength > 0.0:
