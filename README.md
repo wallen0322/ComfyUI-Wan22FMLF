@@ -14,6 +14,9 @@ Multi-frame reference conditioning nodes for Wan2.2 A14B I2V models.
 
 <img width="347" height="461" alt="ead76d24f88d3e773bdbfb34994addf8" src="https://github.com/user-attachments/assets/a2da0900-7439-4e57-a105-b6c772d5f6af" />
 
+# 如果你想做无限续杯多图参考长视频，推荐以下参数：
+
+<img width="539" height="833" alt="a95eec0897a6ac258917b989a0620bab" src="https://github.com/user-attachments/assets/86a2aaed-efd5-4e11-9bca-0518f9239c8f" />
 
 ---
 #DONT WORRY BE HAPPY
