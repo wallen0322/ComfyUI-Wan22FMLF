@@ -9,10 +9,12 @@ Multi-frame reference conditioning nodes for Wan2.2 A14B I2V models.
 高分辨率对剑：704x1280/1280x704
 注意：720*1280会导致中间帧闪烁问题，
 
-如果是变化场景较大，（如变身等）可以切换为normal模式按以下参数设置，
+# 差异比较大的场景：
+如果是变化场景较大，（如变身等）可以切换为normal模式按以下参数设置，使用normal模式，并且低噪lightx2v的Lora权重需要降低到0.6左右，不然低噪会破坏掉你的变化效果。
+
 <img width="347" height="461" alt="ead76d24f88d3e773bdbfb34994addf8" src="https://github.com/user-attachments/assets/a2da0900-7439-4e57-a105-b6c772d5f6af" />
 
-使用normal模式，并且低噪lightx2v的Lora权重需要降低到0.6左右，不然低噪会破坏掉你的变化效果。
+
 ---
 #DONT WORRY BE HAPPY
 建议高噪2步就够了，高噪步数太多会增加中间帧闪的概率
