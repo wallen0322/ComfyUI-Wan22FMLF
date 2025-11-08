@@ -27,6 +27,10 @@ class WanFourFrameReferenceUltimate:
                 "batch_size": ("INT", {"default": 1, "min": 1, "max": 4096}),
             },
             "optional": {
+                "mode": (["NORMAL", "SINGLE_PERSON"], {
+                    "default": "NORMAL",
+                    "tooltip": "NORMAL: full control | SINGLE_PERSON: low noise only uses frame 1"
+                }),
                 "frame_1_image": ("IMAGE",),
                 "frame_2_image": ("IMAGE",),
                 "frame_2_ratio": ("FLOAT", {"default": 0.33, "min": 0.0, "max": 1.0, "step": 0.01, "display": "slider"}),
@@ -41,7 +45,6 @@ class WanFourFrameReferenceUltimate:
                 "enable_frame_3": (["disable", "enable"], {"default": "enable"}),
                 
                 "frame_4_image": ("IMAGE",),
-                "end_frame_offset": ("INT", {"default": 16, "min": 0, "max": 64, "step": 4}),
                 
                 "clip_vision_frame_1": ("CLIP_VISION_OUTPUT",),
                 "clip_vision_frame_2": ("CLIP_VISION_OUTPUT",),
@@ -59,6 +62,7 @@ class WanFourFrameReferenceUltimate:
                  negative: Tuple[Any, ...],
                  vae: Any,
                  width: int, height: int, length: int, batch_size: int,
+                 mode: str = "NORMAL",
                  frame_1_image: Optional[torch.Tensor] = None,
                  frame_2_image: Optional[torch.Tensor] = None,
                  frame_2_ratio: float = 0.33,
@@ -71,7 +75,6 @@ class WanFourFrameReferenceUltimate:
                  frame_3_strength_low: float = 0.2,
                  enable_frame_3: str = "enable",
                  frame_4_image: Optional[torch.Tensor] = None,
-                 end_frame_offset: int = 16,
                  clip_vision_frame_1: Optional[Any] = None,
                  clip_vision_frame_2: Optional[Any] = None,
                  clip_vision_frame_3: Optional[Any] = None,
@@ -110,7 +113,7 @@ class WanFourFrameReferenceUltimate:
         frame_2_idx, frame_2_latent_idx = calculate_aligned_position(frame_2_ratio, length)
         frame_3_idx, frame_3_latent_idx = calculate_aligned_position(frame_3_ratio, length)
         
-        frame_4_idx_raw = length - 1 - end_frame_offset
+        frame_4_idx_raw = length - 1
         frame_4_idx, frame_4_latent_idx = calculate_aligned_position(frame_4_idx_raw / length, length)
         
         if frame_2_idx <= frame_1_idx + 4:
@@ -169,24 +172,38 @@ class WanFourFrameReferenceUltimate:
         # High noise stage: includes all frames
         concat_latent_image_high = vae.encode(image[:, :, :, :3])
         
-        # 低噪声阶段：如果所有中间帧强度都为0则跳过中间帧
-        frame_2_strength = frame_2_strength_low if enable_frame_2 == "enable" else 0.0
-        frame_3_strength = frame_3_strength_low if enable_frame_3 == "enable" else 0.0
-        
-        if frame_2_strength == 0.0 and frame_3_strength == 0.0:
-            # All middle frame strengths are 0: create latent without middle frames
-            image_low_only = torch.ones((length, height, width, 3), device=device) * 0.5
+        # Low noise stage
+        if mode == "SINGLE_PERSON":
+            # SINGLE_PERSON mode: low noise only uses frame_1
+            # Reset mask_low_noise to all 1.0, then only lock frame_1
+            mask_low_noise = mask_base.clone()
+            if frame_1_image is not None:
+                mask_low_noise[:, :, :frame_1_image.shape[0] + 3] = 0.0
             
-            # 只放置frame_1和frame_4
+            image_low_only = torch.ones((length, height, width, 3), device=device) * 0.5
             if frame_1_image is not None:
                 image_low_only[:frame_1_image.shape[0]] = frame_1_image
-            if frame_4_image is not None:
-                image_low_only[frame_4_idx:frame_4_idx + frame_4_image.shape[0]] = frame_4_image
-            
             concat_latent_image_low = vae.encode(image_low_only[:, :, :, :3])
         else:
-            # 有中间帧强度>0：使用完整图像
-            concat_latent_image_low = vae.encode(image[:, :, :, :3])
+            # NORMAL mode
+            # 低噪声阶段：如果所有中间帧强度都为0则跳过中间帧
+            frame_2_strength = frame_2_strength_low if enable_frame_2 == "enable" else 0.0
+            frame_3_strength = frame_3_strength_low if enable_frame_3 == "enable" else 0.0
+            
+            if frame_2_strength == 0.0 and frame_3_strength == 0.0:
+                # All middle frame strengths are 0: create latent without middle frames
+                image_low_only = torch.ones((length, height, width, 3), device=device) * 0.5
+                
+                # 只放置frame_1和frame_4
+                if frame_1_image is not None:
+                    image_low_only[:frame_1_image.shape[0]] = frame_1_image
+                if frame_4_image is not None:
+                    image_low_only[frame_4_idx:frame_4_idx + frame_4_image.shape[0]] = frame_4_image
+                
+                concat_latent_image_low = vae.encode(image_low_only[:, :, :, :3])
+            else:
+                # 有中间帧强度>0：使用完整图像
+                concat_latent_image_low = vae.encode(image[:, :, :, :3])
         
         mask_high_reshaped = mask_high_noise.view(1, mask_high_noise.shape[2] // 4, 4, mask_high_noise.shape[3], mask_high_noise.shape[4]).transpose(1, 2)
         mask_low_reshaped = mask_low_noise.view(1, mask_low_noise.shape[2] // 4, 4, mask_low_noise.shape[3], mask_low_noise.shape[4]).transpose(1, 2)
