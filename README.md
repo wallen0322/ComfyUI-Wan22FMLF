@@ -18,7 +18,10 @@ Multi-frame reference conditioning nodes for Wan2.2 A14B I2V models.
 
 <img width="539" height="833" alt="a95eec0897a6ac258917b989a0620bab" src="https://github.com/user-attachments/assets/86a2aaed-efd5-4e11-9bca-0518f9239c8f" />
 
-# ref_positions 参数使用说明
+
+
+
+# WanMultiFrameRefToVideo中ref_positions 参数使用说明
 
 ## 概述
 `ref_positions` 用于指定参考帧在视频中的位置，支持多种格式。
