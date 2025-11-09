@@ -53,6 +53,22 @@ class WanMultiFrameRefToVideo:
                     "display": "slider",
                     "tooltip": "Low-noise stage strength for middle frames."
                 }),
+                "end_frame_strength_high": ("FLOAT", {
+                    "default": 1.0,
+                    "min": 0.0,
+                    "max": 1.0,
+                    "step": 0.05,
+                    "display": "slider",
+                    "tooltip": "High-noise stage strength for end frame."
+                }),
+                "end_frame_strength_low": ("FLOAT", {
+                    "default": 1.0,
+                    "min": 0.0,
+                    "max": 1.0,
+                    "step": 0.05,
+                    "display": "slider",
+                    "tooltip": "Low-noise stage strength for end frame."
+                }),
 
                 "clip_vision_output": ("CLIP_VISION_OUTPUT",),
             },
@@ -72,6 +88,8 @@ class WanMultiFrameRefToVideo:
                  ref_positions: str = "",
                  ref_strength_high: float = 0.8,
                  ref_strength_low: float = 0.2,
+                 end_frame_strength_high: float = 1.0,
+                 end_frame_strength_low: float = 1.0,
                  clip_vision_output: Optional[Any] = None) -> Tuple[Tuple[Any, ...], Tuple[Any, ...], Tuple[Any, ...], dict]:
         
         spacial_scale = vae.spacial_compression_encode()
@@ -108,10 +126,18 @@ class WanMultiFrameRefToVideo:
             frame_idx = int(pos)
             image[frame_idx:frame_idx + 1] = imgs[i]
             
-            is_endpoint = (i == 0) or (i == n_imgs - 1)
-            if is_endpoint:
+            if i == 0:
                 mask_high_noise[:, :, frame_idx:frame_idx + 4] = 0.0
                 mask_low_noise[:, :, frame_idx:frame_idx + 4] = 0.0
+            elif i == n_imgs - 1:
+                start_range = max(0, frame_idx)
+                end_range = min(length, frame_idx + 4)
+                
+                mask_high_value = 1.0 - end_frame_strength_high
+                mask_high_noise[:, :, start_range:end_range] = mask_high_value
+                
+                mask_low_value = 1.0 - end_frame_strength_low
+                mask_low_noise[:, :, start_range:end_range] = mask_low_value
             else:
                 start_range = max(0, frame_idx)
                 end_range = min(length, frame_idx + 4)
@@ -122,7 +148,30 @@ class WanMultiFrameRefToVideo:
                 mask_low_value = 1.0 - ref_strength_low
                 mask_low_noise[:, :, start_range:end_range] = mask_low_value
 
-        concat_latent_image_high = vae.encode(image[:, :, :, :3])
+        if mode == "SINGLE_PERSON":
+            concat_latent_image_high = vae.encode(image[:, :, :, :3])
+        else:
+            need_selective_image_high = (ref_strength_high == 0.0) or (end_frame_strength_high == 0.0)
+            
+            if need_selective_image_high:
+                image_high_only = torch.ones((length, height, width, 3), device=device) * 0.5
+                
+                if n_imgs >= 1:
+                    frame_idx_first = int(aligned_positions[0])
+                    image_high_only[frame_idx_first:frame_idx_first + 1] = imgs[0]
+                
+                if ref_strength_high > 0.0:
+                    for i in range(1, n_imgs - 1):
+                        frame_idx_mid = int(aligned_positions[i])
+                        image_high_only[frame_idx_mid:frame_idx_mid + 1] = imgs[i]
+                
+                if n_imgs >= 2 and end_frame_strength_high > 0.0:
+                    frame_idx_last = int(aligned_positions[-1])
+                    image_high_only[frame_idx_last:frame_idx_last + 1] = imgs[-1]
+                
+                concat_latent_image_high = vae.encode(image_high_only[:, :, :, :3])
+            else:
+                concat_latent_image_high = vae.encode(image[:, :, :, :3])
         
         if mode == "SINGLE_PERSON":
             mask_low_noise = mask_base.clone()
@@ -130,25 +179,45 @@ class WanMultiFrameRefToVideo:
                 frame_idx_first = int(aligned_positions[0])
                 mask_low_noise[:, :, frame_idx_first:frame_idx_first + 4] = 0.0
             
-            image_low_only = torch.ones((length, height, width, 3), device=device) * 0.5
-            if n_imgs >= 1:
-                frame_idx_first = int(aligned_positions[0])
-                image_low_only[frame_idx_first:frame_idx_first + 1] = imgs[0]
-            concat_latent_image_low = vae.encode(image_low_only[:, :, :, :3])
-        elif ref_strength_low == 0.0:
-            image_low_only = torch.ones((length, height, width, 3), device=device) * 0.5
-            
-            if n_imgs >= 1:
-                frame_idx_first = int(aligned_positions[0])
-                image_low_only[frame_idx_first:frame_idx_first + 1] = imgs[0]
-            
             if n_imgs >= 2:
+                frame_idx_last = int(aligned_positions[-1])
+                start_range = max(0, frame_idx_last)
+                end_range = min(length, frame_idx_last + 4)
+                mask_low_value = 1.0 - end_frame_strength_low
+                mask_low_noise[:, :, start_range:end_range] = mask_low_value
+            
+            image_low_only = torch.ones((length, height, width, 3), device=device) * 0.5
+            if n_imgs >= 1:
+                frame_idx_first = int(aligned_positions[0])
+                image_low_only[frame_idx_first:frame_idx_first + 1] = imgs[0]
+            
+            if n_imgs >= 2 and end_frame_strength_low > 0.0:
                 frame_idx_last = int(aligned_positions[-1])
                 image_low_only[frame_idx_last:frame_idx_last + 1] = imgs[-1]
             
             concat_latent_image_low = vae.encode(image_low_only[:, :, :, :3])
         else:
-            concat_latent_image_low = vae.encode(image[:, :, :, :3])
+            need_selective_image = (ref_strength_low == 0.0) or (end_frame_strength_low == 0.0)
+            
+            if need_selective_image:
+                image_low_only = torch.ones((length, height, width, 3), device=device) * 0.5
+                
+                if n_imgs >= 1:
+                    frame_idx_first = int(aligned_positions[0])
+                    image_low_only[frame_idx_first:frame_idx_first + 1] = imgs[0]
+                
+                if ref_strength_low > 0.0:
+                    for i in range(1, n_imgs - 1):
+                        frame_idx_mid = int(aligned_positions[i])
+                        image_low_only[frame_idx_mid:frame_idx_mid + 1] = imgs[i]
+                
+                if n_imgs >= 2 and end_frame_strength_low > 0.0:
+                    frame_idx_last = int(aligned_positions[-1])
+                    image_low_only[frame_idx_last:frame_idx_last + 1] = imgs[-1]
+                
+                concat_latent_image_low = vae.encode(image_low_only[:, :, :, :3])
+            else:
+                concat_latent_image_low = vae.encode(image[:, :, :, :3])
         
         mask_high_reshaped = mask_high_noise.view(1, mask_high_noise.shape[2] // 4, 4, mask_high_noise.shape[3], mask_high_noise.shape[4]).transpose(1, 2)
         mask_low_reshaped = mask_low_noise.view(1, mask_low_noise.shape[2] // 4, 4, mask_low_noise.shape[3], mask_low_noise.shape[4]).transpose(1, 2)
