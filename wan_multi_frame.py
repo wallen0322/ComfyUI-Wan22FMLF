@@ -124,21 +124,21 @@ class WanMultiFrameRefToVideo:
         
         for i, pos in enumerate(aligned_positions):
             frame_idx = int(pos)
-            image[frame_idx:frame_idx + 1] = imgs[i]
             
             if i == 0:
+                image[frame_idx:frame_idx + 1] = imgs[i]
                 mask_high_noise[:, :, frame_idx:frame_idx + 4] = 0.0
                 mask_low_noise[:, :, frame_idx:frame_idx + 4] = 0.0
             elif i == n_imgs - 1:
-                start_range = max(0, frame_idx)
-                end_range = min(length, frame_idx + 4)
+                image[-1:] = imgs[i]
                 
                 mask_high_value = 1.0 - end_frame_strength_high
-                mask_high_noise[:, :, start_range:end_range] = mask_high_value
+                mask_high_noise[:, :, -4:] = mask_high_value
                 
                 mask_low_value = 1.0 - end_frame_strength_low
-                mask_low_noise[:, :, start_range:end_range] = mask_low_value
+                mask_low_noise[:, :, -4:] = mask_low_value
             else:
+                image[frame_idx:frame_idx + 1] = imgs[i]
                 start_range = max(0, frame_idx)
                 end_range = min(length, frame_idx + 4)
                 
@@ -166,8 +166,7 @@ class WanMultiFrameRefToVideo:
                         image_high_only[frame_idx_mid:frame_idx_mid + 1] = imgs[i]
                 
                 if n_imgs >= 2 and end_frame_strength_high > 0.0:
-                    frame_idx_last = int(aligned_positions[-1])
-                    image_high_only[frame_idx_last:frame_idx_last + 1] = imgs[-1]
+                    image_high_only[-1:] = imgs[-1]
                 
                 concat_latent_image_high = vae.encode(image_high_only[:, :, :, :3])
             else:
@@ -180,11 +179,8 @@ class WanMultiFrameRefToVideo:
                 mask_low_noise[:, :, frame_idx_first:frame_idx_first + 4] = 0.0
             
             if n_imgs >= 2:
-                frame_idx_last = int(aligned_positions[-1])
-                start_range = max(0, frame_idx_last)
-                end_range = min(length, frame_idx_last + 4)
                 mask_low_value = 1.0 - end_frame_strength_low
-                mask_low_noise[:, :, start_range:end_range] = mask_low_value
+                mask_low_noise[:, :, -4:] = mask_low_value
             
             image_low_only = torch.ones((length, height, width, 3), device=device) * 0.5
             if n_imgs >= 1:
@@ -192,8 +188,7 @@ class WanMultiFrameRefToVideo:
                 image_low_only[frame_idx_first:frame_idx_first + 1] = imgs[0]
             
             if n_imgs >= 2 and end_frame_strength_low > 0.0:
-                frame_idx_last = int(aligned_positions[-1])
-                image_low_only[frame_idx_last:frame_idx_last + 1] = imgs[-1]
+                image_low_only[-1:] = imgs[-1]
             
             concat_latent_image_low = vae.encode(image_low_only[:, :, :, :3])
         else:
@@ -212,8 +207,7 @@ class WanMultiFrameRefToVideo:
                         image_low_only[frame_idx_mid:frame_idx_mid + 1] = imgs[i]
                 
                 if n_imgs >= 2 and end_frame_strength_low > 0.0:
-                    frame_idx_last = int(aligned_positions[-1])
-                    image_low_only[frame_idx_last:frame_idx_last + 1] = imgs[-1]
+                    image_low_only[-1:] = imgs[-1]
                 
                 concat_latent_image_low = vae.encode(image_low_only[:, :, :, :3])
             else:
