@@ -93,7 +93,6 @@ class WanMultiFrameRefToVideo:
         image = torch.ones((length, height, width, 3), device=device) * 0.5
         mask_base = torch.ones((1, 1, latent_t * 4, latent.shape[-2], latent.shape[-1]), device=device)
         
-        # 创建双mask
         mask_high_noise = mask_base.clone()
         mask_low_noise = mask_base.clone()
         
@@ -109,26 +108,17 @@ class WanMultiFrameRefToVideo:
                 start_range = max(0, frame_idx)
                 end_range = min(length, frame_idx + 4)
                 
-                # 高噪声mask
                 mask_high_value = 1.0 - ref_strength_high
                 mask_high_noise[:, :, start_range:end_range] = mask_high_value
                 
-                # 低噪声mask
                 mask_low_value = 1.0 - ref_strength_low
                 mask_low_noise[:, :, start_range:end_range] = mask_low_value
-            
 
-        
-        # Separate latent images for high and low noise stages
-        # High noise stage: includes all frames
         concat_latent_image_high = vae.encode(image[:, :, :, :3])
         
-        # Low noise stage: skip all middle frames if strength is 0
         if ref_strength_low == 0.0:
-            # Low noise strength is 0: create latent with only first and last frames
             image_low_only = torch.ones((length, height, width, 3), device=device) * 0.5
             
-            # 只放置首帧和末帧
             if n_imgs >= 1:
                 frame_idx_first = int(aligned_positions[0])
                 image_low_only[frame_idx_first:frame_idx_first + 1] = imgs[0]
@@ -139,7 +129,6 @@ class WanMultiFrameRefToVideo:
             
             concat_latent_image_low = vae.encode(image_low_only[:, :, :, :3])
         else:
-            # 低噪强度>0：使用完整图像
             concat_latent_image_low = vae.encode(image[:, :, :, :3])
         
         mask_high_reshaped = mask_high_noise.view(1, mask_high_noise.shape[2] // 4, 4, mask_high_noise.shape[3], mask_high_noise.shape[4]).transpose(1, 2)
