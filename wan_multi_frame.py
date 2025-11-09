@@ -28,6 +28,10 @@ class WanMultiFrameRefToVideo:
                 "ref_images": ("IMAGE",),
             },
             "optional": {
+                "mode": (["NORMAL", "SINGLE_PERSON"], {
+                    "default": "NORMAL",
+                    "tooltip": "NORMAL: full control | SINGLE_PERSON: low noise only uses first frame"
+                }),
                 "ref_positions": ("STRING", {
                     "default": "", 
                     "multiline": False,
@@ -64,10 +68,10 @@ class WanMultiFrameRefToVideo:
                  vae: Any,
                  width: int, height: int, length: int, batch_size: int,
                  ref_images: torch.Tensor,
+                 mode: str = "NORMAL",
                  ref_positions: str = "",
                  ref_strength_high: float = 0.8,
                  ref_strength_low: float = 0.2,
-
                  clip_vision_output: Optional[Any] = None) -> Tuple[Tuple[Any, ...], Tuple[Any, ...], Tuple[Any, ...], dict]:
         
         spacial_scale = vae.spacial_compression_encode()
@@ -89,6 +93,10 @@ class WanMultiFrameRefToVideo:
             return aligned_pos
         
         aligned_positions = [align_position(int(p), length) for p in positions]
+        
+        for i in range(1, len(aligned_positions)):
+            if aligned_positions[i] <= aligned_positions[i-1] + 3:
+                aligned_positions[i] = min(aligned_positions[i-1] + 4, length - 1)
         
         image = torch.ones((length, height, width, 3), device=device) * 0.5
         mask_base = torch.ones((1, 1, latent_t * 4, latent.shape[-2], latent.shape[-1]), device=device)
@@ -116,7 +124,18 @@ class WanMultiFrameRefToVideo:
 
         concat_latent_image_high = vae.encode(image[:, :, :, :3])
         
-        if ref_strength_low == 0.0:
+        if mode == "SINGLE_PERSON":
+            mask_low_noise = mask_base.clone()
+            if n_imgs >= 1:
+                frame_idx_first = int(aligned_positions[0])
+                mask_low_noise[:, :, frame_idx_first:frame_idx_first + 4] = 0.0
+            
+            image_low_only = torch.ones((length, height, width, 3), device=device) * 0.5
+            if n_imgs >= 1:
+                frame_idx_first = int(aligned_positions[0])
+                image_low_only[frame_idx_first:frame_idx_first + 1] = imgs[0]
+            concat_latent_image_low = vae.encode(image_low_only[:, :, :, :3])
+        elif ref_strength_low == 0.0:
             image_low_only = torch.ones((length, height, width, 3), device=device) * 0.5
             
             if n_imgs >= 1:
