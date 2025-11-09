@@ -26,6 +26,9 @@ Multi-frame reference conditioning nodes for Wan2.2 A14B I2V models.
 ## 概述
 `ref_positions` 用于指定参考帧在视频中的位置，支持多种格式。
 
+## 推荐参数
+
+<img width="662" height="895" alt="bc236db1b17c6d861b8c19f89602d2dc" src="https://github.com/user-attachments/assets/2c496ffc-f63e-4eca-b576-7c9d484f822d" />
 ---
 
 ## 格式说明
