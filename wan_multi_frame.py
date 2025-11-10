@@ -1,96 +1,50 @@
-# -*- coding: utf-8 -*-
-
+from typing_extensions import override
+from comfy_api.latest import io
 import torch
 import json
 from typing import List, Tuple, Optional, Any
 import node_helpers
 import comfy
 import comfy.utils
-from nodes import MAX_RESOLUTION
 
 
-class WanMultiFrameRefToVideo:
-    """
-    Universal N-frame reference node with dual MoE conditioning.
-    """
+class WanMultiFrameRefToVideo(io.ComfyNode):
+    
+    @classmethod
+    def define_schema(cls) -> io.Schema:
+        return io.Schema(
+            node_id="WanMultiFrameRefToVideo",
+            display_name="Wan Multi-Frame Reference",
+            category="ComfyUI-Wan22FMLF",
+            inputs=[
+                io.Conditioning.Input("positive"),
+                io.Conditioning.Input("negative"),
+                io.Vae.Input("vae"),
+                io.Int.Input("width", default=832, min=16, max=8192, step=16, display_mode=io.NumberDisplay.number),
+                io.Int.Input("height", default=480, min=16, max=8192, step=16, display_mode=io.NumberDisplay.number),
+                io.Int.Input("length", default=81, min=1, max=8192, step=4, display_mode=io.NumberDisplay.number),
+                io.Int.Input("batch_size", default=1, min=1, max=4096, display_mode=io.NumberDisplay.number),
+                io.Image.Input("ref_images"),
+                io.Combo.Input("mode", ["NORMAL", "SINGLE_PERSON"], default="NORMAL", optional=True),
+                io.String.Input("ref_positions", default="", optional=True),
+                io.Float.Input("ref_strength_high", default=0.8, min=0.0, max=1.0, step=0.05, round=0.01, display_mode=io.NumberDisplay.slider, optional=True),
+                io.Float.Input("ref_strength_low", default=0.2, min=0.0, max=1.0, step=0.05, round=0.01, display_mode=io.NumberDisplay.slider, optional=True),
+                io.Float.Input("end_frame_strength_high", default=1.0, min=0.0, max=1.0, step=0.05, round=0.01, display_mode=io.NumberDisplay.slider, optional=True),
+                io.Float.Input("end_frame_strength_low", default=1.0, min=0.0, max=1.0, step=0.05, round=0.01, display_mode=io.NumberDisplay.slider, optional=True),
+                io.ClipVisionOutput.Input("clip_vision_output", optional=True),
+            ],
+            outputs=[
+                io.Conditioning.Output("positive_high_noise"),
+                io.Conditioning.Output("positive_low_noise"),
+                io.Conditioning.Output("negative_out"),
+                io.Latent.Output("latent"),
+            ],
+        )
 
     @classmethod
-    def INPUT_TYPES(cls):
-        return {
-            "required": {
-                "positive": ("CONDITIONING",),
-                "negative": ("CONDITIONING",),
-                "vae": ("VAE",),
-                "width": ("INT", {"default": 832, "min": 16, "max": MAX_RESOLUTION, "step": 16}),
-                "height": ("INT", {"default": 480, "min": 16, "max": MAX_RESOLUTION, "step": 16}),
-                "length": ("INT", {"default": 81, "min": 1, "max": MAX_RESOLUTION, "step": 4}),
-                "batch_size": ("INT", {"default": 1, "min": 1, "max": 4096}),
-                "ref_images": ("IMAGE",),
-            },
-            "optional": {
-                "mode": (["NORMAL", "SINGLE_PERSON"], {
-                    "default": "NORMAL",
-                    "tooltip": "NORMAL: full control | SINGLE_PERSON: low noise only uses first frame"
-                }),
-                "ref_positions": ("STRING", {
-                    "default": "", 
-                    "multiline": False,
-                    "tooltip": "Frame indices or ratios. Leave empty for auto distribution."
-                }),
-                "ref_strength_high": ("FLOAT", {
-                    "default": 0.8,
-                    "min": 0.0,
-                    "max": 1.0,
-                    "step": 0.05,
-                    "display": "slider",
-                    "tooltip": "High-noise stage strength for middle frames."
-                }),
-                "ref_strength_low": ("FLOAT", {
-                    "default": 0.2,
-                    "min": 0.0,
-                    "max": 1.0,
-                    "step": 0.05,
-                    "display": "slider",
-                    "tooltip": "Low-noise stage strength for middle frames."
-                }),
-                "end_frame_strength_high": ("FLOAT", {
-                    "default": 1.0,
-                    "min": 0.0,
-                    "max": 1.0,
-                    "step": 0.05,
-                    "display": "slider",
-                    "tooltip": "High-noise stage strength for end frame."
-                }),
-                "end_frame_strength_low": ("FLOAT", {
-                    "default": 1.0,
-                    "min": 0.0,
-                    "max": 1.0,
-                    "step": 0.05,
-                    "display": "slider",
-                    "tooltip": "Low-noise stage strength for end frame."
-                }),
-
-                "clip_vision_output": ("CLIP_VISION_OUTPUT",),
-            },
-        }
-
-    RETURN_TYPES = ("CONDITIONING", "CONDITIONING", "CONDITIONING", "LATENT")
-    RETURN_NAMES = ("positive_high_noise", "positive_low_noise", "negative", "latent")
-    FUNCTION = "generate"
-    CATEGORY = "ComfyUI-Wan22FMLF"
-
-    def generate(self, positive: Tuple[Any, ...], 
-                 negative: Tuple[Any, ...],
-                 vae: Any,
-                 width: int, height: int, length: int, batch_size: int,
-                 ref_images: torch.Tensor,
-                 mode: str = "NORMAL",
-                 ref_positions: str = "",
-                 ref_strength_high: float = 0.8,
-                 ref_strength_low: float = 0.2,
-                 end_frame_strength_high: float = 1.0,
-                 end_frame_strength_low: float = 1.0,
-                 clip_vision_output: Optional[Any] = None) -> Tuple[Tuple[Any, ...], Tuple[Any, ...], Tuple[Any, ...], dict]:
+    def execute(cls, positive, negative, vae, width, height, length, batch_size, ref_images,
+                mode="NORMAL", ref_positions="", ref_strength_high=0.8, ref_strength_low=0.2,
+                end_frame_strength_high=1.0, end_frame_strength_low=1.0, clip_vision_output=None):
         
         spacial_scale = vae.spacial_compression_encode()
         latent_channels = vae.latent_channels
@@ -100,9 +54,9 @@ class WanMultiFrameRefToVideo:
         latent = torch.zeros([batch_size, latent_channels, latent_t, 
                              height // spacial_scale, width // spacial_scale], device=device)
         
-        imgs = self._resize_images(ref_images, width, height, device)
+        imgs = cls._resize_images(ref_images, width, height, device)
         n_imgs = imgs.shape[0]
-        positions = self._parse_positions(ref_positions, n_imgs, length)
+        positions = cls._parse_positions(ref_positions, n_imgs, length)
         
         def align_position(pos: int, total_frames: int) -> int:
             latent_idx = pos // 4
@@ -234,7 +188,8 @@ class WanMultiFrameRefToVideo:
         
         return (positive_high_noise, positive_low_noise, negative_out, {"samples": latent})
 
-    def _resize_images(self, images: torch.Tensor, width: int, height: int, device: torch.device) -> torch.Tensor:
+    @classmethod
+    def _resize_images(cls, images, width, height, device):
         images = images.to(device)
         x = images.movedim(-1, 1)
         x = comfy.utils.common_upscale(x, width, height, "bilinear", "center")
@@ -245,7 +200,8 @@ class WanMultiFrameRefToVideo:
         
         return x
 
-    def _parse_positions(self, pos_str: str, n_imgs: int, length: int) -> List[int]:
+    @classmethod
+    def _parse_positions(cls, pos_str, n_imgs, length):
         positions = []
         s = (pos_str or "").strip()
         
@@ -279,7 +235,3 @@ class WanMultiFrameRefToVideo:
             converted_positions.extend([converted_positions[-1]] * (n_imgs - len(converted_positions)))
         
         return converted_positions
-
-
-NODE_CLASS_MAPPINGS = {"WanMultiFrameRefToVideo": WanMultiFrameRefToVideo}
-NODE_DISPLAY_NAME_MAPPINGS = {"WanMultiFrameRefToVideo": "Wan Multi-Frame Reference (Dual MoE)"}
