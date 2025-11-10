@@ -1,37 +1,112 @@
 from typing_extensions import override
-from comfy_api.latest import io
+from comfy_api.latest import ComfyExtension, io
 import torch
-import json
-from typing import List, Tuple, Optional, Any
 import node_helpers
 import comfy
 import comfy.utils
+import comfy.clip_vision
 
 
-class WanMultiFrameRefToVideo(io.ComfyNode):
+class WanFirstMiddleLastFrameToVideo(io.ComfyNode):
     
     @classmethod
     def define_schema(cls) -> io.Schema:
         return io.Schema(
-            node_id="WanMultiFrameRefToVideo",
-            display_name="Wan Multi-Frame Reference",
+            node_id="WanFirstMiddleLastFrameToVideo",
+            display_name="Wan First-Middle-Last Frame to Video",
             category="ComfyUI-Wan22FMLF",
             inputs=[
                 io.Conditioning.Input("positive"),
                 io.Conditioning.Input("negative"),
                 io.Vae.Input("vae"),
-                io.Int.Input("width", default=832, min=16, max=8192, step=16, display_mode=io.NumberDisplay.number),
-                io.Int.Input("height", default=480, min=16, max=8192, step=16, display_mode=io.NumberDisplay.number),
-                io.Int.Input("length", default=81, min=1, max=8192, step=4, display_mode=io.NumberDisplay.number),
-                io.Int.Input("batch_size", default=1, min=1, max=4096, display_mode=io.NumberDisplay.number),
-                io.Image.Input("ref_images"),
+                io.Int.Input(
+                    "width",
+                    default=832,
+                    min=16,
+                    max=8192,
+                    step=16,
+                    display_mode=io.NumberDisplay.number,
+                ),
+                io.Int.Input(
+                    "height",
+                    default=480,
+                    min=16,
+                    max=8192,
+                    step=16,
+                    display_mode=io.NumberDisplay.number,
+                ),
+                io.Int.Input(
+                    "length",
+                    default=81,
+                    min=1,
+                    max=8192,
+                    step=4,
+                    display_mode=io.NumberDisplay.number,
+                ),
+                io.Int.Input(
+                    "batch_size",
+                    default=1,
+                    min=1,
+                    max=4096,
+                    display_mode=io.NumberDisplay.number,
+                ),
                 io.Combo.Input("mode", ["NORMAL", "SINGLE_PERSON"], default="NORMAL", optional=True),
-                io.String.Input("ref_positions", default="", optional=True),
-                io.Float.Input("ref_strength_high", default=0.8, min=0.0, max=1.0, step=0.05, round=0.01, display_mode=io.NumberDisplay.slider, optional=True),
-                io.Float.Input("ref_strength_low", default=0.2, min=0.0, max=1.0, step=0.05, round=0.01, display_mode=io.NumberDisplay.slider, optional=True),
-                io.Float.Input("end_frame_strength_high", default=1.0, min=0.0, max=1.0, step=0.05, round=0.01, display_mode=io.NumberDisplay.slider, optional=True),
-                io.Float.Input("end_frame_strength_low", default=1.0, min=0.0, max=1.0, step=0.05, round=0.01, display_mode=io.NumberDisplay.slider, optional=True),
-                io.ClipVisionOutput.Input("clip_vision_output", optional=True),
+                io.Image.Input("start_image", optional=True),
+                io.Image.Input("middle_image", optional=True),
+                io.Image.Input("end_image", optional=True),
+                io.Float.Input(
+                    "middle_frame_ratio",
+                    default=0.5,
+                    min=0.0,
+                    max=1.0,
+                    step=0.01,
+                    round=0.01,
+                    display_mode=io.NumberDisplay.slider,
+                    optional=True,
+                ),
+                io.Float.Input(
+                    "high_noise_mid_strength",
+                    default=0.8,
+                    min=0.0,
+                    max=1.0,
+                    step=0.05,
+                    round=0.01,
+                    display_mode=io.NumberDisplay.slider,
+                    optional=True,
+                ),
+                io.Float.Input(
+                    "low_noise_start_strength",
+                    default=1.0,
+                    min=0.0,
+                    max=1.0,
+                    step=0.05,
+                    round=0.01,
+                    display_mode=io.NumberDisplay.slider,
+                    optional=True,
+                ),
+                io.Float.Input(
+                    "low_noise_mid_strength",
+                    default=0.2,
+                    min=0.0,
+                    max=1.0,
+                    step=0.05,
+                    round=0.01,
+                    display_mode=io.NumberDisplay.slider,
+                    optional=True,
+                ),
+                io.Float.Input(
+                    "low_noise_end_strength",
+                    default=1.0,
+                    min=0.0,
+                    max=1.0,
+                    step=0.05,
+                    round=0.01,
+                    display_mode=io.NumberDisplay.slider,
+                    optional=True,
+                ),
+                io.ClipVisionOutput.Input("clip_vision_start_image", optional=True),
+                io.ClipVisionOutput.Input("clip_vision_middle_image", optional=True),
+                io.ClipVisionOutput.Input("clip_vision_end_image", optional=True),
             ],
             outputs=[
                 io.Conditioning.Output("positive_high_noise"),
@@ -42,196 +117,191 @@ class WanMultiFrameRefToVideo(io.ComfyNode):
         )
 
     @classmethod
-    def execute(cls, positive, negative, vae, width, height, length, batch_size, ref_images,
-                mode="NORMAL", ref_positions="", ref_strength_high=0.8, ref_strength_low=0.2,
-                end_frame_strength_high=1.0, end_frame_strength_low=1.0, clip_vision_output=None):
-        
+    def execute(
+        cls,
+        positive,
+        negative,
+        vae,
+        width,
+        height,
+        length,
+        batch_size,
+        mode="NORMAL",
+        start_image=None,
+        middle_image=None,
+        end_image=None,
+        middle_frame_ratio=0.5,
+        high_noise_mid_strength=0.8,
+        low_noise_start_strength=1.0,
+        low_noise_mid_strength=0.2,
+        low_noise_end_strength=1.0,
+        clip_vision_start_image=None,
+        clip_vision_middle_image=None,
+        clip_vision_end_image=None,
+    ):
         spacial_scale = vae.spacial_compression_encode()
         latent_channels = vae.latent_channels
         latent_t = ((length - 1) // 4) + 1
+
         device = comfy.model_management.intermediate_device()
-        
-        latent = torch.zeros([batch_size, latent_channels, latent_t, 
-                             height // spacial_scale, width // spacial_scale], device=device)
-        
-        imgs = cls._resize_images(ref_images, width, height, device)
-        n_imgs = imgs.shape[0]
-        positions = cls._parse_positions(ref_positions, n_imgs, length)
-        
-        def align_position(pos: int, total_frames: int) -> int:
-            latent_idx = pos // 4
-            aligned_pos = latent_idx * 4
-            aligned_pos = max(0, min(aligned_pos, total_frames - 1))
-            return aligned_pos
-        
-        aligned_positions = [align_position(int(p), length) for p in positions]
-        
-        for i in range(1, len(aligned_positions)):
-            if aligned_positions[i] <= aligned_positions[i-1] + 3:
-                aligned_positions[i] = min(aligned_positions[i-1] + 4, length - 1)
-        
+
+        latent = torch.zeros(
+            [batch_size, latent_channels, latent_t, height // spacial_scale, width // spacial_scale],
+            device=device
+        )
+
+        if start_image is not None:
+            start_image = comfy.utils.common_upscale(
+                start_image[:length].movedim(-1, 1),
+                width,
+                height,
+                "bilinear",
+                "center"
+            ).movedim(1, -1)
+
+        if middle_image is not None:
+            middle_image = comfy.utils.common_upscale(
+                middle_image[:1].movedim(-1, 1),
+                width,
+                height,
+                "bilinear",
+                "center"
+            ).movedim(1, -1)
+
+        if end_image is not None:
+            end_image = comfy.utils.common_upscale(
+                end_image[-length:].movedim(-1, 1),
+                width,
+                height,
+                "bilinear",
+                "center"
+            ).movedim(1, -1)
+
         image = torch.ones((length, height, width, 3), device=device) * 0.5
-        mask_base = torch.ones((1, 1, latent_t * 4, latent.shape[-2], latent.shape[-1]), device=device)
-        
+        mask_base = torch.ones(
+            (1, 1, latent_t * 4, latent.shape[-2], latent.shape[-1]),
+            device=device
+        )
+
+        middle_idx = cls._calculate_aligned_position(middle_frame_ratio, length)
+        middle_idx = max(4, min(middle_idx, length - 5))
+
         mask_high_noise = mask_base.clone()
         mask_low_noise = mask_base.clone()
-        
-        for i, pos in enumerate(aligned_positions):
-            frame_idx = int(pos)
+
+        if start_image is not None:
+            image[:start_image.shape[0]] = start_image
+            mask_high_noise[:, :, :start_image.shape[0] + 3] = 0.0
             
-            if i == 0:
-                image[frame_idx:frame_idx + 1] = imgs[i]
-                mask_high_noise[:, :, frame_idx:frame_idx + 4] = 0.0
-                mask_low_noise[:, :, frame_idx:frame_idx + 4] = 0.0
-            elif i == n_imgs - 1:
-                image[-1:] = imgs[i]
-                
-                mask_high_value = 1.0 - end_frame_strength_high
-                mask_high_noise[:, :, -4:] = mask_high_value
-                
-                mask_low_value = 1.0 - end_frame_strength_low
-                mask_low_noise[:, :, -4:] = mask_low_value
-            else:
-                image[frame_idx:frame_idx + 1] = imgs[i]
-                start_range = max(0, frame_idx)
-                end_range = min(length, frame_idx + 4)
-                
-                mask_high_value = 1.0 - ref_strength_high
-                mask_high_noise[:, :, start_range:end_range] = mask_high_value
-                
-                mask_low_value = 1.0 - ref_strength_low
-                mask_low_noise[:, :, start_range:end_range] = mask_low_value
+            low_start_mask_value = 1.0 - low_noise_start_strength
+            mask_low_noise[:, :, :start_image.shape[0] + 3] = low_start_mask_value
+
+        if middle_image is not None:
+            image[middle_idx:middle_idx + 1] = middle_image
+
+            start_range = max(0, middle_idx)
+            end_range = min(length, middle_idx + 4)
+
+            high_noise_mask_value = 1.0 - high_noise_mid_strength
+            mask_high_noise[:, :, start_range:end_range] = high_noise_mask_value
+
+            low_middle_mask_value = 1.0 - low_noise_mid_strength
+            mask_low_noise[:, :, start_range:end_range] = low_middle_mask_value
+
+        if end_image is not None:
+            image[-end_image.shape[0]:] = end_image
+            mask_high_noise[:, :, -end_image.shape[0]:] = 0.0
+            
+            low_end_mask_value = 1.0 - low_noise_end_strength
+            mask_low_noise[:, :, -end_image.shape[0]:] = low_end_mask_value
+
+        concat_latent_image = vae.encode(image[:, :, :, :3])
 
         if mode == "SINGLE_PERSON":
-            concat_latent_image_high = vae.encode(image[:, :, :, :3])
-        else:
-            need_selective_image_high = (ref_strength_high == 0.0) or (end_frame_strength_high == 0.0)
-            
-            if need_selective_image_high:
-                image_high_only = torch.ones((length, height, width, 3), device=device) * 0.5
-                
-                if n_imgs >= 1:
-                    frame_idx_first = int(aligned_positions[0])
-                    image_high_only[frame_idx_first:frame_idx_first + 1] = imgs[0]
-                
-                if ref_strength_high > 0.0:
-                    for i in range(1, n_imgs - 1):
-                        frame_idx_mid = int(aligned_positions[i])
-                        image_high_only[frame_idx_mid:frame_idx_mid + 1] = imgs[i]
-                
-                if n_imgs >= 2 and end_frame_strength_high > 0.0:
-                    image_high_only[-1:] = imgs[-1]
-                
-                concat_latent_image_high = vae.encode(image_high_only[:, :, :, :3])
-            else:
-                concat_latent_image_high = vae.encode(image[:, :, :, :3])
-        
-        if mode == "SINGLE_PERSON":
-            mask_low_noise = mask_base.clone()
-            if n_imgs >= 1:
-                frame_idx_first = int(aligned_positions[0])
-                mask_low_noise[:, :, frame_idx_first:frame_idx_first + 4] = 0.0
-            
-            if n_imgs >= 2:
-                mask_low_value = 1.0 - end_frame_strength_low
-                mask_low_noise[:, :, -4:] = mask_low_value
-            
             image_low_only = torch.ones((length, height, width, 3), device=device) * 0.5
-            if n_imgs >= 1:
-                frame_idx_first = int(aligned_positions[0])
-                image_low_only[frame_idx_first:frame_idx_first + 1] = imgs[0]
+            if start_image is not None:
+                image_low_only[:start_image.shape[0]] = start_image
+            concat_latent_image_low = vae.encode(image_low_only[:, :, :, :3])
+        elif low_noise_start_strength == 0.0 or low_noise_mid_strength == 0.0 or low_noise_end_strength == 0.0:
+            image_low_only = torch.ones((length, height, width, 3), device=device) * 0.5
+
+            if start_image is not None and low_noise_start_strength > 0.0:
+                image_low_only[:start_image.shape[0]] = start_image
             
-            if n_imgs >= 2 and end_frame_strength_low > 0.0:
-                image_low_only[-1:] = imgs[-1]
+            if middle_image is not None and low_noise_mid_strength > 0.0:
+                image_low_only[middle_idx:middle_idx + 1] = middle_image
             
+            if end_image is not None and low_noise_end_strength > 0.0:
+                image_low_only[-end_image.shape[0]:] = end_image
+
             concat_latent_image_low = vae.encode(image_low_only[:, :, :, :3])
         else:
-            need_selective_image = (ref_strength_low == 0.0) or (end_frame_strength_low == 0.0)
-            
-            if need_selective_image:
-                image_low_only = torch.ones((length, height, width, 3), device=device) * 0.5
-                
-                if n_imgs >= 1:
-                    frame_idx_first = int(aligned_positions[0])
-                    image_low_only[frame_idx_first:frame_idx_first + 1] = imgs[0]
-                
-                if ref_strength_low > 0.0:
-                    for i in range(1, n_imgs - 1):
-                        frame_idx_mid = int(aligned_positions[i])
-                        image_low_only[frame_idx_mid:frame_idx_mid + 1] = imgs[i]
-                
-                if n_imgs >= 2 and end_frame_strength_low > 0.0:
-                    image_low_only[-1:] = imgs[-1]
-                
-                concat_latent_image_low = vae.encode(image_low_only[:, :, :, :3])
-            else:
-                concat_latent_image_low = vae.encode(image[:, :, :, :3])
-        
-        mask_high_reshaped = mask_high_noise.view(1, mask_high_noise.shape[2] // 4, 4, mask_high_noise.shape[3], mask_high_noise.shape[4]).transpose(1, 2)
-        mask_low_reshaped = mask_low_noise.view(1, mask_low_noise.shape[2] // 4, 4, mask_low_noise.shape[3], mask_low_noise.shape[4]).transpose(1, 2)
-        
+            concat_latent_image_low = concat_latent_image
+
+        mask_high_reshaped = mask_high_noise.view(
+            1,
+            mask_high_noise.shape[2] // 4,
+            4,
+            mask_high_noise.shape[3],
+            mask_high_noise.shape[4]
+        ).transpose(1, 2)
+
+        mask_low_reshaped = mask_low_noise.view(
+            1,
+            mask_low_noise.shape[2] // 4,
+            4,
+            mask_low_noise.shape[3],
+            mask_low_noise.shape[4]
+        ).transpose(1, 2)
+
         positive_high_noise = node_helpers.conditioning_set_values(positive, {
-            "concat_latent_image": concat_latent_image_high,
+            "concat_latent_image": concat_latent_image,
             "concat_mask": mask_high_reshaped
         })
-        
+
         positive_low_noise = node_helpers.conditioning_set_values(positive, {
             "concat_latent_image": concat_latent_image_low,
             "concat_mask": mask_low_reshaped
         })
-        
-        negative_out = negative
-        
+
+        clip_vision_output = cls._merge_clip_vision_outputs(
+            clip_vision_start_image,
+            clip_vision_middle_image,
+            clip_vision_end_image
+        )
+
         if clip_vision_output is not None:
-            positive_low_noise = node_helpers.conditioning_set_values(positive_low_noise, 
-                                                                   {"clip_vision_output": clip_vision_output})
-        
-        return (positive_high_noise, positive_low_noise, negative_out, {"samples": latent})
+            positive_low_noise = node_helpers.conditioning_set_values(
+                positive_low_noise,
+                {"clip_vision_output": clip_vision_output}
+            )
+
+        out_latent = {"samples": latent}
+
+        return (positive_high_noise, positive_low_noise, negative, out_latent)
 
     @classmethod
-    def _resize_images(cls, images, width, height, device):
-        images = images.to(device)
-        x = images.movedim(-1, 1)
-        x = comfy.utils.common_upscale(x, width, height, "bilinear", "center")
-        x = x.movedim(1, -1)
-        
-        if x.shape[-1] == 4:
-            x = x[..., :3]
-        
-        return x
+    def _calculate_aligned_position(cls, ratio, total_frames):
+        desired_idx = int(total_frames * ratio)
+        latent_idx = desired_idx // 4
+        aligned_idx = latent_idx * 4
+        aligned_idx = max(0, min(aligned_idx, total_frames - 1))
+        return aligned_idx
 
     @classmethod
-    def _parse_positions(cls, pos_str, n_imgs, length):
-        positions = []
-        s = (pos_str or "").strip()
-        
-        if s:
-            try:
-                if s.startswith("["):
-                    positions = json.loads(s)
-                else:
-                    positions = [float(x.strip()) for x in s.split(",") if x.strip()]
-            except Exception:
-                positions = []
-        
-        if not positions:
-            if n_imgs <= 1:
-                positions = [0]
-            else:
-                positions = [i * (length - 1) / (n_imgs - 1) for i in range(n_imgs)]
-        
-        converted_positions = []
-        for p in positions:
-            if 0 <= p < 2.0:
-                converted_positions.append(int(p * (length - 1)))
-            else:
-                converted_positions.append(int(p))
-        
-        converted_positions = [max(0, min(length - 1, p)) for p in converted_positions]
-        
-        if len(converted_positions) > n_imgs:
-            converted_positions = converted_positions[:n_imgs]
-        elif len(converted_positions) < n_imgs:
-            converted_positions.extend([converted_positions[-1]] * (n_imgs - len(converted_positions)))
-        
-        return converted_positions
+    def _merge_clip_vision_outputs(cls, *outputs):
+        valid_outputs = [o for o in outputs if o is not None]
+
+        if not valid_outputs:
+            return None
+
+        if len(valid_outputs) == 1:
+            return valid_outputs[0]
+
+        all_states = [o.penultimate_hidden_states for o in valid_outputs]
+        combined_states = torch.cat(all_states, dim=-2)
+
+        result = comfy.clip_vision.Output()
+        result.penultimate_hidden_states = combined_states
+        return result
+
