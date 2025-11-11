@@ -1,5 +1,17 @@
 import { app } from "../../scripts/app.js";
 
+const onBeforeSerialize = LGraph.prototype.onBeforeSerialize;
+LGraph.prototype.onBeforeSerialize = function() {
+    onBeforeSerialize?.apply(this, arguments);
+    
+    const nodes = app.graph.findNodesByType("WanMultiImageLoader");
+    for (const node of nodes) {
+        if (node.syncDataIfDirty) {
+            node.syncDataIfDirty();
+        }
+    }
+};
+
 app.registerExtension({
     name: "Comfy.WanMultiImageLoader",
     
@@ -11,7 +23,6 @@ app.registerExtension({
                 const result = onNodeCreated?.apply(this, arguments);
                 const node = this;
                 
-                // 1. 安全查找或创建 hidden widget
                 let imagesDataWidget = this.widgets.find(w => w.name === "images_data");
                 if (!imagesDataWidget) {
                     imagesDataWidget = this.addWidget("text", "images_data", "[]", () => {}, {
@@ -21,52 +32,40 @@ app.registerExtension({
                     imagesDataWidget.computeSize = () => [0, -4];
                 }
                 
-                // --- DOM 元素创建 (不变) ---
                 const container = document.createElement("div");
                 container.style.cssText = "width:100%;padding:8px;background:#1a1a1a;border-radius:6px;margin:5px 0;";
-                
                 const btnContainer = document.createElement("div");
                 btnContainer.style.cssText = "display:flex;gap:6px;margin-bottom:8px;";
-                
                 const uploadBtn = document.createElement("button");
                 uploadBtn.textContent = "📁 选择";
                 uploadBtn.style.cssText = "flex:1;padding:8px;background:#2a2a2a;color:#fff;border:1px solid #444;border-radius:4px;cursor:pointer;font-size:13px;";
-                
                 const addBtn = document.createElement("button");
                 addBtn.textContent = "➕ 增加";
                 addBtn.style.cssText = "flex:1;padding:8px;background:#2a4a2a;color:#fff;border:1px solid #4a6;border-radius:4px;cursor:pointer;font-size:13px;";
-                
                 const sortBtn = document.createElement("button");
                 sortBtn.textContent = "🔃 排序";
                 sortBtn.style.cssText = "padding:8px;background:#2a2a4a;color:#fff;border:1px solid #46a;border-radius:4px;cursor:pointer;font-size:13px;";
-                
                 const clearBtn = document.createElement("button");
                 clearBtn.textContent = "🗑️";
                 clearBtn.style.cssText = "padding:8px;background:#4a2a2a;color:#fff;border:1px solid #a44;border-radius:4px;cursor:pointer;font-size:13px;";
-                
                 const fileInput = document.createElement("input");
                 fileInput.type = "file";
                 fileInput.multiple = true;
                 fileInput.accept = "image/*";
                 fileInput.style.display = "none";
-                
                 const progressBar = document.createElement("div");
                 progressBar.style.cssText = "display:none;height:3px;background:#333;border-radius:2px;margin-bottom:6px;overflow:hidden;";
                 const progressFill = document.createElement("div");
                 progressFill.style.cssText = "height:100%;background:#4a6;width:0%;transition:width 0.2s;";
                 progressBar.appendChild(progressFill);
-                
                 const previewContainer = document.createElement("div");
                 previewContainer.style.cssText = "display:grid;grid-template-columns:repeat(auto-fill,minmax(100px,1fr));gap:6px;max-height:300px;overflow-y:auto;background:#252525;padding:6px;border-radius:4px;";
                 
-                // 2. 核心状态 (不变)
                 let images = []; 
                 let sortOrders = {};
                 let isAdding = false;
+                let isDirty = false;
                 
-                // --- 核心功能函数 ---
-                
-                // 压缩 (不变)
                 const compressImage = (base64Data) => {
                     return new Promise((resolve) => {
                         const img = new Image();
@@ -90,17 +89,21 @@ app.registerExtension({
                     });
                 };
 
-                // 3. updateWidgetValue (不变)
-                const updateWidgetValue = () => {
+                const syncWidgetData = () => {
                     const dataToStore = images.map(item => ({ name: item.name, data: item.data }));
                     imagesDataWidget.value = JSON.stringify(dataToStore);
+                    isDirty = false; 
                 };
 
-                // 4. updateHighlight (不变)
+                this.syncDataIfDirty = () => {
+                    if (isDirty) {
+                        syncWidgetData();
+                    }
+                };
+
                 const updateHighlight = () => {
                     const indexWidget = node.widgets.find(w => w.name === "index");
                     const currentIndex = indexWidget ? indexWidget.value : 0;
-                    
                     previewContainer.querySelectorAll("div[data-index]").forEach(container => {
                         const thumb = container.querySelector("div");
                         const idx = parseInt(container.dataset.index);
@@ -114,26 +117,12 @@ app.registerExtension({
                     });
                 };
 
-                // 5. createThumbnail (不变)
                 const createThumbnail = (index, compressedData, parent) => {
-                    const container = document.createElement("div");
-                    container.dataset.index = index;
-                    container.style.cssText = "display:flex;flex-direction:column;gap:3px;";
-                    
-                    const thumb = document.createElement("div");
-                    thumb.style.cssText = "position:relative;aspect-ratio:1;border-radius:4px;overflow:hidden;cursor:pointer;border:2px solid transparent;background:#000;";
-                    
-                    const img = document.createElement("img");
-img.src = compressedData;
-                    img.style.cssText = "width:100%;height:100%;object-fit:cover;";
-                    
-                    const label = document.createElement("div");
-                    label.textContent = `#${index}`;
-                    label.style.cssText = "position:absolute;top:2px;left:2px;background:rgba(0,0,0,0.7);color:#fff;padding:2px 4px;border-radius:3px;font-size:11px;pointer-events:none;";
-                    
-                    const deleteBtn = document.createElement("button");
-                    deleteBtn.textContent = "×";
-                    deleteBtn.style.cssText = "position:absolute;top:2px;right:2px;width:20px;height:20px;background:rgba(255,0,0,0.7);color:#fff;border:none;border-radius:3px;cursor:pointer;font-size:16px;line-height:1;";
+                    const container = document.createElement("div"); container.dataset.index = index; container.style.cssText = "display:flex;flex-direction:column;gap:3px;";
+                    const thumb = document.createElement("div"); thumb.style.cssText = "position:relative;aspect-ratio:1;border-radius:4px;overflow:hidden;cursor:pointer;border:2px solid transparent;background:#000;";
+                    const img = document.createElement("img"); img.src = compressedData; img.style.cssText = "width:100%;height:100%;object-fit:cover;";
+                    const label = document.createElement("div"); label.textContent = `#${index}`; label.style.cssText = "position:absolute;top:2px;left:2px;background:rgba(0,0,0,0.7);color:#fff;padding:2px 4px;border-radius:3px;font-size:11px;pointer-events:none;";
+                    const deleteBtn = document.createElement("button"); deleteBtn.textContent = "×"; deleteBtn.style.cssText = "position:absolute;top:2px;right:2px;width:20px;height:20px;background:rgba(255,0,0,0.7);color:#fff;border:none;border-radius:3px;cursor:pointer;font-size:16px;line-height:1;";
                     
                     deleteBtn.onclick = (e) => {
                         e.stopPropagation();
@@ -149,11 +138,10 @@ img.src = compressedData;
                         sortOrders = newOrders;
                         
                         redrawAll();
+                        isDirty = true;
                     };
                     
-                    thumb.appendChild(img);
-                    thumb.appendChild(label);
-                    thumb.appendChild(deleteBtn);
+                    thumb.appendChild(img); thumb.appendChild(label); thumb.appendChild(deleteBtn);
                     
                     thumb.onclick = () => {
                         const indexWidget = node.widgets.find(w => w.name === "index");
@@ -163,22 +151,15 @@ img.src = compressedData;
                         }
                     };
                     
-                    const orderInput = document.createElement("input");
-                    orderInput.type = "number";
-                    orderInput.placeholder = index;
-                    orderInput.value = sortOrders[index] !== undefined ? sortOrders[index] : "";
-                    orderInput.style.cssText = "width:100%;padding:3px;background:#2a2a2a;border:1px solid #444;border-radius:3px;color:#fff;font-size:11px;text-align:center;";
+                    const orderInput = document.createElement("input"); orderInput.type = "number"; orderInput.placeholder = index; orderInput.value = sortOrders[index] !== undefined ? sortOrders[index] : ""; orderInput.style.cssText = "width:100%;padding:3px;background:#2a2a2a;border:1px solid #444;border-radius:3px;color:#fff;font-size:11px;text-align:center;";
                     orderInput.oninput = (e) => {
                         const val = e.target.value.trim();
                         sortOrders[index] = val !== "" ? parseInt(val) : undefined;
                     };
                     
-                    container.appendChild(thumb);
-                    container.appendChild(orderInput);
-                    parent.appendChild(container);
+                    container.appendChild(thumb); container.appendChild(orderInput); parent.appendChild(container);
                 };
 
-                // 6. redrawAll (不变)
                 const redrawAll = () => {
                     previewContainer.innerHTML = "";
                     const fragment = document.createDocumentFragment();
@@ -188,11 +169,9 @@ img.src = compressedData;
                     }
                     
                     previewContainer.appendChild(fragment);
-                    updateWidgetValue(); 
                     updateHighlight();
                 };
 
-                // 7. `applySorting` (不变)
                 const applySorting = () => {
                     const indices = [];
                     for (let i = 0; i < images.length; i++) {
@@ -207,10 +186,10 @@ img.src = compressedData;
                     images = sorted; 
                     sortOrders = {};
                     
-                    redrawAll(); 
+                    redrawAll();
+                    isDirty = true;
                 };
                 
-                // 8. `processFiles` (*** 已修复BUG ***)
                 const processFiles = async (files, replace = true) => {
                     if (replace) {
                         images = []; 
@@ -227,29 +206,18 @@ img.src = compressedData;
                     
                     const batchSize = 5;
                     
-                    // --- 关键修复 ---
                     for (let i = 0; i < totalFiles; i += batchSize) {
                         const batch = files.slice(i, Math.min(i + batchSize, totalFiles));
-                        
-                        // 1. 在循环 *内部* 创建 Fragment
                         const batchFragment = document.createDocumentFragment();
 
                         await Promise.all(batch.map(async (file, batchIdx) => {
                             const actualIndex = startIndex + i + batchIdx;
-                            
                             return new Promise((resolve) => {
                                 const reader = new FileReader();
                                 reader.onload = async (event) => {
                                     const base64Data = event.target.result;
                                     const compressedData = await compressImage(base64Data);
-                                    
-                                    images[actualIndex] = { 
-                                        name: file.name, 
-                                        data: base64Data, 
-                                        thumb: compressedData 
-                                    };
-                                    
-                                    // 2. 附加到批次 Fragment
+                                    images[actualIndex] = { name: file.name, data: base64Data, thumb: compressedData };
                                     createThumbnail(actualIndex, compressedData, batchFragment); 
                                     resolve();
                                 };
@@ -257,14 +225,12 @@ img.src = compressedData;
                             });
                         }));
                         
-                        // 3. 附加 *实际的* Fragment，而不是克隆它
                         previewContainer.appendChild(batchFragment); 
-                        
                         progressFill.style.width = Math.min(((i + batchSize) / totalFiles) * 100, 100) + "%";
                         await new Promise(resolve => setTimeout(resolve, 0));
                     }
                     
-                    updateWidgetValue(); 
+                    syncWidgetData(); 
                     
                     setTimeout(() => {
                         progressBar.style.display = "none";
@@ -275,7 +241,6 @@ img.src = compressedData;
                     }, 200);
                 };
 
-                // 9. `initializeFromWidget` (不变)
                 const initializeFromWidget = async () => {
                     try {
                         const data = JSON.parse(imagesDataWidget.value);
@@ -286,23 +251,15 @@ img.src = compressedData;
                         
                         images = []; 
                         previewContainer.innerHTML = "";
-                        
                         progressBar.style.display = "block";
                         progressFill.style.width = "0%";
-                        
                         const total = data.length;
                         const fragment = document.createDocumentFragment();
 
                         for (let i = 0; i < total; i++) {
                             const item = data[i];
                             const compressedData = await compressImage(item.data); 
-                            
-                            images[i] = { 
-                                name: item.name, 
-                                data: item.data, 
-                                thumb: compressedData 
-                            };
-                            
+                            images[i] = { name: item.name, data: item.data, thumb: compressedData };
                             createThumbnail(i, compressedData, fragment);
                             
                             if (i % 10 === 0 || i === total - 1) {
@@ -319,14 +276,13 @@ img.src = compressedData;
                         images = [];
                         imagesDataWidget.value = "[]";
                     } finally {
+                        isDirty = false; 
                         setTimeout(() => {
                             progressBar.style.display = "none";
                             progressFill.style.width = "0%";
                         }, 200);
                     }
                 };
-
-                // --- 事件绑定 (不变) ---
                 
                 fileInput.onchange = async (e) => {
                     const files = Array.from(e.target.files);
@@ -355,24 +311,16 @@ img.src = compressedData;
                         images = [];
                         sortOrders = {};
                         previewContainer.innerHTML = "";
-                        updateWidgetValue(); 
+                        syncWidgetData(); 
                     }
                 };
                 
-                // --- 启动 (不变) ---
-                btnContainer.appendChild(uploadBtn);
-                btnContainer.appendChild(addBtn);
-                btnContainer.appendChild(sortBtn);
-                btnContainer.appendChild(clearBtn);
-                container.appendChild(btnContainer);
-                container.appendChild(progressBar);
-                container.appendChild(previewContainer);
-                container.appendChild(fileInput);
+                btnContainer.appendChild(uploadBtn); btnContainer.appendChild(addBtn); btnContainer.appendChild(sortBtn); btnContainer.appendChild(clearBtn);
+                container.appendChild(btnContainer); container.appendChild(progressBar); container.appendChild(previewContainer); container.appendChild(fileInput);
                 
                 this.addDOMWidget("multi_image_loader", "customwidget", container);
                 this.setSize([400, 280]);
                 
-                // 10. 启动时初始化
                 initializeFromWidget();
                 
                 return result;
