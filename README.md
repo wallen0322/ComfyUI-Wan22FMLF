@@ -18,7 +18,9 @@ Multi-frame reference conditioning nodes for Wan2.2 A14B I2V models.
 
 <img width="539" height="833" alt="a95eec0897a6ac258917b989a0620bab" src="https://github.com/user-attachments/assets/86a2aaed-efd5-4e11-9bca-0518f9239c8f" />
 
+**更新3图循环工作流，增加一个可视化选择图片的节点，不用再去建文件夹和改图片名字了，更新立刻享受**
 
+<img width="1864" height="790" alt="b4c8bd757112957d576b03a1714b100e" src="https://github.com/user-attachments/assets/1e3665f4-a664-408e-a6b4-06ff9bfa0c8b" />
 
 
 # WanMultiFrameRefToVideo中ref_positions 参数使用说明
@@ -162,10 +164,6 @@ A: 可以，使用自定义位置：`"0, 10, 15, 20, 50, 80"`
 
 **Q: 位置会自动排序吗？**
 A: 不会，请按顺序输入位置值
-
-**更新3图循环工作流，增加一个可视化选择图片的节点，不用再去建文件夹和改图片名字了，更新立刻享受**
-
-<img width="1864" height="790" alt="b4c8bd757112957d576b03a1714b100e" src="https://github.com/user-attachments/assets/1e3665f4-a664-408e-a6b4-06ff9bfa0c8b" />
 
 
 ---
