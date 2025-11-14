@@ -1,153 +1,73 @@
-# -*- coding: utf-8 -*-
-
+from typing_extensions import override
+from comfy_api.latest import io
 import torch
 import node_helpers
 import comfy
 import comfy.utils
 import comfy.clip_vision
-from nodes import MAX_RESOLUTION
 from typing import Optional, Tuple, Any
 
 
-class WanAdvancedI2V:
-    """
-    Advanced unified node for Wan2.2 A14B I2V with automatic chaining support.
+class WanAdvancedI2V(io.ComfyNode):
     
-    Core Features:
-    - Triple frame reference (first, middle, last) for precise control
-    - Dual MoE conditioning outputs (high-noise and low-noise stages)
-    - Multi-motion frames support for dynamic sequences
-    - Automatic video chaining with offset mechanism
-    - SVI-SHOT mode for infinite video generation with separate conditioning
-    - Adjustable constraint strengths for each stage
-    - CLIP Vision integration
+    RETURN_TYPES = ("CONDITIONING", "CONDITIONING", "CONDITIONING", "LATENT", "LATENT", "IMAGE", "INT")
+    RETURN_NAMES = ("positive_high", "positive_low", "negative", "latent", "trim_latent", "trim_image", "next_offset")
+    CATEGORY = "ComfyUI-Wan22FMLF"
+    FUNCTION = "execute"
+    OUTPUT_NODE = False
     
-    Long Video Modes:
-    - DISABLED: Standard single-shot generation
-    - AUTO_CONTINUE: motion_frames replace start_image at frame 0
-    - SVI_SHOT: Stable Video Infinity SHOT mode with separate high/low noise conditioning
-    """
+    @classmethod
+    def define_schema(cls) -> io.Schema:
+        return io.Schema(
+            node_id="WanAdvancedI2V",
+            display_name="Wan Advanced I2V (Ultimate)",
+            category="ComfyUI-Wan22FMLF",
+            inputs=[
+                io.Conditioning.Input("positive"),
+                io.Conditioning.Input("negative"),
+                io.Vae.Input("vae"),
+                io.Int.Input("width", default=832, min=16, max=8192, step=16, display_mode=io.NumberDisplay.number),
+                io.Int.Input("height", default=480, min=16, max=8192, step=16, display_mode=io.NumberDisplay.number),
+                io.Int.Input("length", default=81, min=1, max=8192, step=4, display_mode=io.NumberDisplay.number),
+                io.Int.Input("batch_size", default=1, min=1, max=4096, display_mode=io.NumberDisplay.number),
+                io.Combo.Input("mode", ["NORMAL", "SINGLE_PERSON"], default="NORMAL", optional=True),
+                io.Image.Input("start_image", optional=True),
+                io.Image.Input("middle_image", optional=True),
+                io.Image.Input("end_image", optional=True),
+                io.Float.Input("middle_frame_ratio", default=0.5, min=0.0, max=1.0, step=0.01, round=0.01, display_mode=io.NumberDisplay.slider, optional=True),
+                io.Image.Input("motion_frames", optional=True),
+                io.Int.Input("video_frame_offset", default=0, min=0, max=1000000, step=1, display_mode=io.NumberDisplay.number, optional=True),
+                io.Combo.Input("long_video_mode", ["DISABLED", "AUTO_CONTINUE", "SVI_SHOT"], default="DISABLED", optional=True),
+                io.Int.Input("continue_frames_count", default=5, min=0, max=20, step=1, display_mode=io.NumberDisplay.number, optional=True),
+                io.Float.Input("high_noise_mid_strength", default=0.8, min=0.0, max=1.0, step=0.05, round=0.01, display_mode=io.NumberDisplay.slider, optional=True),
+                io.Float.Input("low_noise_start_strength", default=1.0, min=0.0, max=1.0, step=0.05, round=0.01, display_mode=io.NumberDisplay.slider, optional=True),
+                io.Float.Input("low_noise_mid_strength", default=0.2, min=0.0, max=1.0, step=0.05, round=0.01, display_mode=io.NumberDisplay.slider, optional=True),
+                io.Float.Input("low_noise_end_strength", default=1.0, min=0.0, max=1.0, step=0.05, round=0.01, display_mode=io.NumberDisplay.slider, optional=True),
+                io.ClipVisionOutput.Input("clip_vision_start_image", optional=True),
+                io.ClipVisionOutput.Input("clip_vision_middle_image", optional=True),
+                io.ClipVisionOutput.Input("clip_vision_end_image", optional=True),
+                io.Boolean.Input("enable_middle_frame", default=True, optional=True),
+            ],
+            outputs=[
+                io.Conditioning.Output(display_name="positive_high"),
+                io.Conditioning.Output(display_name="positive_low"),
+                io.Conditioning.Output(display_name="negative"),
+                io.Latent.Output(display_name="latent"),
+                io.Latent.Output(display_name="trim_latent"),
+                io.Image.Output(display_name="trim_image"),
+                io.Int.Output(display_name="next_offset"),
+            ],
+        )
 
     @classmethod
-    def INPUT_TYPES(cls):
-        return {
-            "required": {
-                "positive": ("CONDITIONING",),
-                "negative": ("CONDITIONING",),
-                "vae": ("VAE",),
-                "width": ("INT", {"default": 832, "min": 16, "max": MAX_RESOLUTION, "step": 16}),
-                "height": ("INT", {"default": 480, "min": 16, "max": MAX_RESOLUTION, "step": 16}),
-                "length": ("INT", {"default": 81, "min": 1, "max": MAX_RESOLUTION, "step": 4}),
-                "batch_size": ("INT", {"default": 1, "min": 1, "max": 4096}),
-            },
-            "optional": {
-                "mode": (["NORMAL", "SINGLE_PERSON"], {
-                    "default": "NORMAL",
-                    "tooltip": "NORMAL: full control | SINGLE_PERSON: low noise only uses start image"
-                }),
-                "start_image": ("IMAGE",),
-                "middle_image": ("IMAGE",),
-                "end_image": ("IMAGE",),
-                "middle_frame_ratio": ("FLOAT", {
-                    "default": 0.5, 
-                    "min": 0.0, 
-                    "max": 1.0, 
-                    "step": 0.01,
-                    "display": "slider",
-                    "tooltip": "Position of middle frame on timeline (0.5 = center)"
-                }),
-                "motion_frames": ("IMAGE",),
-                "video_frame_offset": ("INT", {
-                    "default": 0,
-                    "min": 0,
-                    "max": 1000000,
-                    "step": 1,
-                    "tooltip": "Frame offset for sequential video generation"
-                }),
-                "long_video_mode": (["DISABLED", "AUTO_CONTINUE", "SVI_SHOT"], {
-                    "default": "DISABLED",
-                    "tooltip": "DISABLED=normal | AUTO_CONTINUE=motion at frame 0 | SVI_SHOT=separate high/low noise"
-                }),
-                "continue_frames_count": ("INT", {
-                    "default": 5,
-                    "min": 0,
-                    "max": 20,
-                    "step": 1,
-                    "tooltip": "Number of frames to extract from motion_frames for continuation"
-                }),
-                "high_noise_mid_strength": ("FLOAT", {
-                    "default": 0.8,
-                    "min": 0.0,
-                    "max": 1.0,
-                    "step": 0.05,
-                    "display": "slider",
-                    "tooltip": "High-noise stage middle frame constraint strength"
-                }),
-                "low_noise_start_strength": ("FLOAT", {
-                    "default": 1.0,
-                    "min": 0.0,
-                    "max": 1.0,
-                    "step": 0.05,
-                    "display": "slider",
-                    "tooltip": "Low-noise stage start frame constraint strength"
-                }),
-                "low_noise_mid_strength": ("FLOAT", {
-                    "default": 0.2,
-                    "min": 0.0,
-                    "max": 1.0,
-                    "step": 0.05,
-                    "display": "slider",
-                    "tooltip": "Low-noise stage middle frame constraint strength"
-                }),
-                "low_noise_end_strength": ("FLOAT", {
-                    "default": 1.0,
-                    "min": 0.0,
-                    "max": 1.0,
-                    "step": 0.05,
-                    "display": "slider",
-                    "tooltip": "Low-noise stage end frame constraint strength"
-                }),
-                "clip_vision_start_image": ("CLIP_VISION_OUTPUT",),
-                "clip_vision_middle_image": ("CLIP_VISION_OUTPUT",),
-                "clip_vision_end_image": ("CLIP_VISION_OUTPUT",),
-                "enable_middle_frame": ("BOOLEAN", {
-                    "default": True,
-                    "tooltip": "Enable middle frame constraint in triple frame reference mode"
-                }),
-            },
-        }
-
-    RETURN_TYPES = ("CONDITIONING", "CONDITIONING", "CONDITIONING", "LATENT", "INT", "INT", "INT")
-    RETURN_NAMES = ("positive_high_noise", "positive_low_noise", "negative", "latent", 
-                    "trim_latent", "trim_image", "next_offset")
-    FUNCTION = "generate"
-    CATEGORY = "ComfyUI-Wan22FMLF"
-
-    def generate(self, 
-                 positive: Tuple[Any, ...], 
-                 negative: Tuple[Any, ...],
-                 vae: Any,
-                 width: int, 
-                 height: int, 
-                 length: int, 
-                 batch_size: int,
-                 mode: str = "NORMAL",
-                 start_image: Optional[torch.Tensor] = None,
-                 middle_image: Optional[torch.Tensor] = None,
-                 end_image: Optional[torch.Tensor] = None,
-                 middle_frame_ratio: float = 0.5,
-                 motion_frames: Optional[torch.Tensor] = None,
-                 video_frame_offset: int = 0,
-                 long_video_mode: str = "DISABLED",
-                 continue_frames_count: int = 5,
-                 high_noise_mid_strength: float = 0.8,
-                 low_noise_start_strength: float = 1.0,
-                 low_noise_mid_strength: float = 0.2,
-                 low_noise_end_strength: float = 1.0,
-                 clip_vision_start_image: Optional[Any] = None,
-                 clip_vision_middle_image: Optional[Any] = None,
-                 clip_vision_end_image: Optional[Any] = None,
-                 enable_middle_frame: bool = True) -> Tuple[Tuple[Any, ...], Tuple[Any, ...], Tuple[Any, ...], dict, int, int, int]:
+    def execute(cls, positive, negative, vae, width, height, length, batch_size,
+                mode="NORMAL", start_image=None, middle_image=None, end_image=None,
+                middle_frame_ratio=0.5, motion_frames=None, video_frame_offset=0,
+                long_video_mode="DISABLED", continue_frames_count=5,
+                high_noise_mid_strength=0.8, low_noise_start_strength=1.0,
+                low_noise_mid_strength=0.2, low_noise_end_strength=1.0,
+                clip_vision_start_image=None, clip_vision_middle_image=None,
+                clip_vision_end_image=None, enable_middle_frame=True):
         
         spacial_scale = vae.spacial_compression_encode()
         latent_channels = vae.latent_channels
@@ -218,7 +138,7 @@ class WanAdvancedI2V:
         image = torch.ones((length, height, width, 3), device=device) * 0.5
         mask_base = torch.ones((1, 1, latent_t * 4, latent.shape[-2], latent.shape[-1]), device=device)
         
-        middle_idx = self._calculate_aligned_position(middle_frame_ratio, length)[0]
+        middle_idx = cls._calculate_aligned_position(middle_frame_ratio, length)[0]
         middle_idx = max(4, min(middle_idx, length - 5))
         
         mask_high_noise = mask_base.clone()
@@ -359,7 +279,7 @@ class WanAdvancedI2V:
             "concat_mask": mask_high_reshaped
         })
         
-        clip_vision_output = self._merge_clip_vision_outputs(
+        clip_vision_output = cls._merge_clip_vision_outputs(
             clip_vision_start_image, 
             clip_vision_middle_image, 
             clip_vision_end_image
@@ -377,17 +297,19 @@ class WanAdvancedI2V:
         
         out_latent = {"samples": latent}
         
-        return (positive_high_noise, positive_low_noise, negative_out, out_latent,
+        return io.NodeOutput(positive_high_noise, positive_low_noise, negative_out, out_latent,
                 trim_latent, trim_image, next_offset)
     
-    def _calculate_aligned_position(self, ratio: float, total_frames: int) -> Tuple[int, int]:
+    @classmethod
+    def _calculate_aligned_position(cls, ratio, total_frames):
         desired_pixel_idx = int(total_frames * ratio)
         latent_idx = desired_pixel_idx // 4
         aligned_pixel_idx = latent_idx * 4
         aligned_pixel_idx = max(0, min(aligned_pixel_idx, total_frames - 1))
         return aligned_pixel_idx, latent_idx
     
-    def _merge_clip_vision_outputs(self, *outputs: Any) -> Optional[Any]:
+    @classmethod
+    def _merge_clip_vision_outputs(cls, *outputs):
         valid_outputs = [o for o in outputs if o is not None]
         
         if not valid_outputs:
@@ -404,80 +326,57 @@ class WanAdvancedI2V:
         return result
 
 
-class WanAdvancedExtractLastFrames:
-    """Extract last N frames from latent for video stitching"""
+class WanAdvancedExtractLastFrames(io.ComfyNode):
     
     @classmethod
-    def INPUT_TYPES(cls):
-        return {
-            "required": {
-                "samples": ("LATENT",),
-                "num_frames": ("INT", {
-                    "default": 9, 
-                    "min": 0, 
-                    "max": 81, 
-                    "step": 1,
-                    "tooltip": "Number of frames to extract"
-                }),
-            },
-        }
+    def define_schema(cls) -> io.Schema:
+        return io.Schema(
+            node_id="WanAdvancedExtractLastFrames",
+            display_name="Wan Extract Last Frames (Latent)",
+            category="ComfyUI-Wan22FMLF",
+            inputs=[
+                io.Latent.Input("samples"),
+                io.Int.Input("num_frames", default=9, min=0, max=81, step=1, display_mode=io.NumberDisplay.number),
+            ],
+            outputs=[
+                io.Latent.Output("last_frames"),
+            ],
+        )
     
-    RETURN_TYPES = ("LATENT",)
-    RETURN_NAMES = ("last_frames",)
-    FUNCTION = "extract"
-    CATEGORY = "ComfyUI-Wan22FMLF"
-    
-    def extract(self, samples: dict, num_frames: int) -> Tuple[dict]:
+    @classmethod
+    def execute(cls, samples, num_frames):
         if num_frames == 0:
             out = {"samples": torch.zeros_like(samples["samples"][:, :, :0])}
-            return (out,)
+            return io.NodeOutput(out)
         
         latent_frames = ((num_frames - 1) // 4) + 1
         last_latent = samples["samples"][:, :, -latent_frames:].clone()
         out = {"samples": last_latent}
-        return (out,)
+        return io.NodeOutput(out)
 
 
-class WanAdvancedExtractLastImages:
-    """Extract last N images for video stitching"""
+class WanAdvancedExtractLastImages(io.ComfyNode):
     
     @classmethod
-    def INPUT_TYPES(cls):
-        return {
-            "required": {
-                "images": ("IMAGE",),
-                "num_frames": ("INT", {
-                    "default": 9, 
-                    "min": 0, 
-                    "max": 81, 
-                    "step": 1,
-                    "tooltip": "Number of image frames to extract"
-                }),
-            },
-        }
+    def define_schema(cls) -> io.Schema:
+        return io.Schema(
+            node_id="WanAdvancedExtractLastImages",
+            display_name="Wan Extract Last Images",
+            category="ComfyUI-Wan22FMLF",
+            inputs=[
+                io.Image.Input("images"),
+                io.Int.Input("num_frames", default=9, min=0, max=81, step=1, display_mode=io.NumberDisplay.number),
+            ],
+            outputs=[
+                io.Image.Output("last_images"),
+            ],
+        )
     
-    RETURN_TYPES = ("IMAGE",)
-    RETURN_NAMES = ("last_images",)
-    FUNCTION = "extract"
-    CATEGORY = "ComfyUI-Wan22FMLF"
-    
-    def extract(self, images: torch.Tensor, num_frames: int) -> Tuple[torch.Tensor]:
+    @classmethod
+    def execute(cls, images, num_frames):
         if num_frames == 0:
             last_images = images[:0].clone()
-            return (last_images,)
+            return io.NodeOutput(last_images)
         
         last_images = images[-num_frames:].clone()
-        return (last_images,)
-
-
-NODE_CLASS_MAPPINGS = {
-    "WanAdvancedI2V": WanAdvancedI2V,
-    "WanAdvancedExtractLastFrames": WanAdvancedExtractLastFrames,
-    "WanAdvancedExtractLastImages": WanAdvancedExtractLastImages,
-}
-
-NODE_DISPLAY_NAME_MAPPINGS = {
-    "WanAdvancedI2V": "Wan Advanced I2V (Ultimate)",
-    "WanAdvancedExtractLastFrames": "Wan Extract Last Frames (Latent)",
-    "WanAdvancedExtractLastImages": "Wan Extract Last Images",
-}
+        return io.NodeOutput(last_images)

@@ -1,84 +1,69 @@
-# -*- coding: utf-8 -*-
-
+from typing_extensions import override
+from comfy_api.latest import io
 import torch
 import node_helpers
 import comfy
 import comfy.utils
 import comfy.clip_vision
-from nodes import MAX_RESOLUTION
 from typing import Optional, Tuple, Any
 
 
-class WanFourFrameReferenceUltimate:
-    """
-    4-frame reference node with dual MoE conditioning.
-    """
+class WanFourFrameReferenceUltimate(io.ComfyNode):
+    
+    RETURN_TYPES = ("CONDITIONING", "CONDITIONING", "CONDITIONING", "LATENT")
+    RETURN_NAMES = ("positive_high", "positive_low", "negative", "latent")
+    CATEGORY = "ComfyUI-Wan22FMLF"
+    FUNCTION = "execute"
+    OUTPUT_NODE = False
+    
+    @classmethod
+    def define_schema(cls) -> io.Schema:
+        return io.Schema(
+            node_id="WanFourFrameReferenceUltimate",
+            display_name="Wan 4-Frame Reference",
+            category="ComfyUI-Wan22FMLF",
+            inputs=[
+                io.Conditioning.Input("positive"),
+                io.Conditioning.Input("negative"),
+                io.Vae.Input("vae"),
+                io.Int.Input("width", default=832, min=16, max=8192, step=16, display_mode=io.NumberDisplay.number),
+                io.Int.Input("height", default=480, min=16, max=8192, step=16, display_mode=io.NumberDisplay.number),
+                io.Int.Input("length", default=81, min=1, max=8192, step=4, display_mode=io.NumberDisplay.number),
+                io.Int.Input("batch_size", default=1, min=1, max=4096, display_mode=io.NumberDisplay.number),
+                io.Combo.Input("mode", ["NORMAL", "SINGLE_PERSON"], default="NORMAL", optional=True),
+                io.Image.Input("frame_1_image", optional=True),
+                io.Image.Input("frame_2_image", optional=True),
+                io.Float.Input("frame_2_ratio", default=0.33, min=0.0, max=1.0, step=0.01, round=0.01, display_mode=io.NumberDisplay.slider, optional=True),
+                io.Float.Input("frame_2_strength_high", default=0.8, min=0.0, max=1.0, step=0.05, round=0.01, display_mode=io.NumberDisplay.slider, optional=True),
+                io.Float.Input("frame_2_strength_low", default=0.2, min=0.0, max=1.0, step=0.05, round=0.01, display_mode=io.NumberDisplay.slider, optional=True),
+                io.Combo.Input("enable_frame_2", ["disable", "enable"], default="enable", optional=True),
+                io.Image.Input("frame_3_image", optional=True),
+                io.Float.Input("frame_3_ratio", default=0.67, min=0.0, max=1.0, step=0.01, round=0.01, display_mode=io.NumberDisplay.slider, optional=True),
+                io.Float.Input("frame_3_strength_high", default=0.8, min=0.0, max=1.0, step=0.05, round=0.01, display_mode=io.NumberDisplay.slider, optional=True),
+                io.Float.Input("frame_3_strength_low", default=0.2, min=0.0, max=1.0, step=0.05, round=0.01, display_mode=io.NumberDisplay.slider, optional=True),
+                io.Combo.Input("enable_frame_3", ["disable", "enable"], default="enable", optional=True),
+                io.Image.Input("frame_4_image", optional=True),
+                io.ClipVisionOutput.Input("clip_vision_frame_1", optional=True),
+                io.ClipVisionOutput.Input("clip_vision_frame_2", optional=True),
+                io.ClipVisionOutput.Input("clip_vision_frame_3", optional=True),
+                io.ClipVisionOutput.Input("clip_vision_frame_4", optional=True),
+            ],
+            outputs=[
+                io.Conditioning.Output(display_name="positive_high"),
+                io.Conditioning.Output(display_name="positive_low"),
+                io.Conditioning.Output(display_name="negative"),
+                io.Latent.Output(display_name="latent"),
+            ],
+        )
 
     @classmethod
-    def INPUT_TYPES(cls):
-        return {
-            "required": {
-                "positive": ("CONDITIONING",),
-                "negative": ("CONDITIONING",),
-                "vae": ("VAE",),
-                "width": ("INT", {"default": 832, "min": 16, "max": MAX_RESOLUTION, "step": 16}),
-                "height": ("INT", {"default": 480, "min": 16, "max": MAX_RESOLUTION, "step": 16}),
-                "length": ("INT", {"default": 81, "min": 1, "max": MAX_RESOLUTION, "step": 4}),
-                "batch_size": ("INT", {"default": 1, "min": 1, "max": 4096}),
-            },
-            "optional": {
-                "mode": (["NORMAL", "SINGLE_PERSON"], {
-                    "default": "NORMAL",
-                    "tooltip": "NORMAL: full control | SINGLE_PERSON: low noise only uses frame 1"
-                }),
-                "frame_1_image": ("IMAGE",),
-                "frame_2_image": ("IMAGE",),
-                "frame_2_ratio": ("FLOAT", {"default": 0.33, "min": 0.0, "max": 1.0, "step": 0.01, "display": "slider"}),
-                "frame_2_strength_high": ("FLOAT", {"default": 0.8, "min": 0.0, "max": 1.0, "step": 0.05, "display": "slider"}),
-                "frame_2_strength_low": ("FLOAT", {"default": 0.2, "min": 0.0, "max": 1.0, "step": 0.05, "display": "slider"}),
-                "enable_frame_2": (["disable", "enable"], {"default": "enable"}),
-                
-                "frame_3_image": ("IMAGE",),
-                "frame_3_ratio": ("FLOAT", {"default": 0.67, "min": 0.0, "max": 1.0, "step": 0.01, "display": "slider"}),
-                "frame_3_strength_high": ("FLOAT", {"default": 0.8, "min": 0.0, "max": 1.0, "step": 0.05, "display": "slider"}),
-                "frame_3_strength_low": ("FLOAT", {"default": 0.2, "min": 0.0, "max": 1.0, "step": 0.05, "display": "slider"}),
-                "enable_frame_3": (["disable", "enable"], {"default": "enable"}),
-                
-                "frame_4_image": ("IMAGE",),
-                
-                "clip_vision_frame_1": ("CLIP_VISION_OUTPUT",),
-                "clip_vision_frame_2": ("CLIP_VISION_OUTPUT",),
-                "clip_vision_frame_3": ("CLIP_VISION_OUTPUT",),
-                "clip_vision_frame_4": ("CLIP_VISION_OUTPUT",),
-            },
-        }
-
-    RETURN_TYPES = ("CONDITIONING", "CONDITIONING", "CONDITIONING", "LATENT")
-    RETURN_NAMES = ("positive_high_noise", "positive_low_noise", "negative", "latent")
-    FUNCTION = "generate"
-    CATEGORY = "ComfyUI-Wan22FMLF"
-
-    def generate(self, positive: Tuple[Any, ...], 
-                 negative: Tuple[Any, ...],
-                 vae: Any,
-                 width: int, height: int, length: int, batch_size: int,
-                 mode: str = "NORMAL",
-                 frame_1_image: Optional[torch.Tensor] = None,
-                 frame_2_image: Optional[torch.Tensor] = None,
-                 frame_2_ratio: float = 0.33,
-                 frame_2_strength_high: float = 0.8,
-                 frame_2_strength_low: float = 0.2,
-                 enable_frame_2: str = "enable",
-                 frame_3_image: Optional[torch.Tensor] = None,
-                 frame_3_ratio: float = 0.67,
-                 frame_3_strength_high: float = 0.8,
-                 frame_3_strength_low: float = 0.2,
-                 enable_frame_3: str = "enable",
-                 frame_4_image: Optional[torch.Tensor] = None,
-                 clip_vision_frame_1: Optional[Any] = None,
-                 clip_vision_frame_2: Optional[Any] = None,
-                 clip_vision_frame_3: Optional[Any] = None,
-                 clip_vision_frame_4: Optional[Any] = None) -> Tuple[Tuple[Any, ...], Tuple[Any, ...], Tuple[Any, ...], dict]:
+    def execute(cls, positive, negative, vae, width, height, length, batch_size,
+                mode="NORMAL", frame_1_image=None, frame_2_image=None, frame_2_ratio=0.33,
+                frame_2_strength_high=0.8, frame_2_strength_low=0.2, enable_frame_2="enable",
+                frame_3_image=None, frame_3_ratio=0.67, frame_3_strength_high=0.8,
+                frame_3_strength_low=0.2, enable_frame_3="enable", frame_4_image=None,
+                clip_vision_frame_1=None, clip_vision_frame_2=None,
+                clip_vision_frame_3=None, clip_vision_frame_4=None):
         
         spacial_scale = vae.spacial_compression_encode()
         latent_channels = vae.latent_channels
@@ -210,13 +195,13 @@ class WanFourFrameReferenceUltimate:
             "concat_mask": mask_low_reshaped
         })
         
-        # 修复：negative也设置图像条件（使用high noise的条件）
+        
         negative_out = node_helpers.conditioning_set_values(negative, {
             "concat_latent_image": concat_latent_image_high,
             "concat_mask": mask_high_reshaped
         })
         
-        clip_vision_output = self._merge_clip_vision_outputs(
+        clip_vision_output = cls._merge_clip_vision_outputs(
             clip_vision_frame_1, clip_vision_frame_2, 
             clip_vision_frame_3, clip_vision_frame_4
         )
@@ -224,13 +209,14 @@ class WanFourFrameReferenceUltimate:
         if clip_vision_output is not None:
             positive_low_noise = node_helpers.conditioning_set_values(positive_low_noise, 
                                                                    {"clip_vision_output": clip_vision_output})
-            # 修复：negative也应用clip_vision_output
+            
             negative_out = node_helpers.conditioning_set_values(negative_out, 
                                                              {"clip_vision_output": clip_vision_output})
         
-        return (positive_high_noise, positive_low_noise, negative_out, {"samples": latent})
+        return io.NodeOutput(positive_high_noise, positive_low_noise, negative_out, {"samples": latent})
 
-    def _merge_clip_vision_outputs(self, *outputs: Any) -> Optional[Any]:
+    @classmethod
+    def _merge_clip_vision_outputs(cls, *outputs):
         valid_outputs = [o for o in outputs if o is not None]
         if not valid_outputs:
             return None
@@ -243,7 +229,3 @@ class WanFourFrameReferenceUltimate:
         result = comfy.clip_vision.Output()
         result.penultimate_hidden_states = combined_states
         return result
-
-
-NODE_CLASS_MAPPINGS = {"WanFourFrameReferenceUltimate": WanFourFrameReferenceUltimate}
-NODE_DISPLAY_NAME_MAPPINGS = {"WanFourFrameReferenceUltimate": "Wan 4-Frame Reference (Dual MoE)"}
