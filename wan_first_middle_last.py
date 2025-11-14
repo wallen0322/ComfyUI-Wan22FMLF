@@ -1,111 +1,150 @@
-# -*- coding: utf-8 -*-
-
+from typing_extensions import override
+from comfy_api.latest import ComfyExtension, io
 import torch
 import node_helpers
 import comfy
 import comfy.utils
 import comfy.clip_vision
-from nodes import MAX_RESOLUTION
-from typing import Optional, Tuple, Any
 
 
-class WanFirstMiddleLastFrameToVideo:
-    """
-    3-frame reference node for Wan2.x I2V with dual MoE conditioning.
-    Supports Wan2.1 and Wan2.2 models.
-    """
+class WanFirstMiddleLastFrameToVideo(io.ComfyNode):
+    
+    RETURN_TYPES = ("CONDITIONING", "CONDITIONING", "CONDITIONING", "LATENT")
+    RETURN_NAMES = ("positive_high", "positive_low", "negative", "latent")
+    CATEGORY = "ComfyUI-Wan22FMLF"
+    FUNCTION = "execute"
+    OUTPUT_NODE = False
+    
+    @classmethod
+    def define_schema(cls) -> io.Schema:
+        return io.Schema(
+            node_id="WanFirstMiddleLastFrameToVideo",
+            display_name="Wan First-Middle-Last Frame to Video",
+            category="ComfyUI-Wan22FMLF",
+            inputs=[
+                io.Conditioning.Input("positive"),
+                io.Conditioning.Input("negative"),
+                io.Vae.Input("vae"),
+                io.Int.Input(
+                    "width",
+                    default=832,
+                    min=16,
+                    max=8192,
+                    step=16,
+                    display_mode=io.NumberDisplay.number,
+                ),
+                io.Int.Input(
+                    "height",
+                    default=480,
+                    min=16,
+                    max=8192,
+                    step=16,
+                    display_mode=io.NumberDisplay.number,
+                ),
+                io.Int.Input(
+                    "length",
+                    default=81,
+                    min=1,
+                    max=8192,
+                    step=4,
+                    display_mode=io.NumberDisplay.number,
+                ),
+                io.Int.Input(
+                    "batch_size",
+                    default=1,
+                    min=1,
+                    max=4096,
+                    display_mode=io.NumberDisplay.number,
+                ),
+                io.Combo.Input("mode", ["NORMAL", "SINGLE_PERSON"], default="NORMAL", optional=True),
+                io.Image.Input("start_image", optional=True),
+                io.Image.Input("middle_image", optional=True),
+                io.Image.Input("end_image", optional=True),
+                io.Float.Input(
+                    "middle_frame_ratio",
+                    default=0.5,
+                    min=0.0,
+                    max=1.0,
+                    step=0.01,
+                    round=0.01,
+                    display_mode=io.NumberDisplay.slider,
+                    optional=True,
+                ),
+                io.Float.Input(
+                    "high_noise_mid_strength",
+                    default=0.8,
+                    min=0.0,
+                    max=1.0,
+                    step=0.05,
+                    round=0.01,
+                    display_mode=io.NumberDisplay.slider,
+                    optional=True,
+                ),
+                io.Float.Input(
+                    "low_noise_start_strength",
+                    default=1.0,
+                    min=0.0,
+                    max=1.0,
+                    step=0.05,
+                    round=0.01,
+                    display_mode=io.NumberDisplay.slider,
+                    optional=True,
+                ),
+                io.Float.Input(
+                    "low_noise_mid_strength",
+                    default=0.2,
+                    min=0.0,
+                    max=1.0,
+                    step=0.05,
+                    round=0.01,
+                    display_mode=io.NumberDisplay.slider,
+                    optional=True,
+                ),
+                io.Float.Input(
+                    "low_noise_end_strength",
+                    default=1.0,
+                    min=0.0,
+                    max=1.0,
+                    step=0.05,
+                    round=0.01,
+                    display_mode=io.NumberDisplay.slider,
+                    optional=True,
+                ),
+                io.ClipVisionOutput.Input("clip_vision_start_image", optional=True),
+                io.ClipVisionOutput.Input("clip_vision_middle_image", optional=True),
+                io.ClipVisionOutput.Input("clip_vision_end_image", optional=True),
+            ],
+            outputs=[
+                io.Conditioning.Output(display_name="positive_high"),
+                io.Conditioning.Output(display_name="positive_low"),
+                io.Conditioning.Output(display_name="negative"),
+                io.Latent.Output(display_name="latent"),
+            ],
+        )
 
     @classmethod
-    def INPUT_TYPES(cls):
-        return {
-            "required": {
-                "positive": ("CONDITIONING",),
-                "negative": ("CONDITIONING",),
-                "vae": ("VAE",),
-                "width": ("INT", {"default": 832, "min": 16, "max": MAX_RESOLUTION, "step": 16}),
-                "height": ("INT", {"default": 480, "min": 16, "max": MAX_RESOLUTION, "step": 16}),
-                "length": ("INT", {"default": 81, "min": 1, "max": MAX_RESOLUTION, "step": 4}),
-                "batch_size": ("INT", {"default": 1, "min": 1, "max": 4096}),
-            },
-            "optional": {
-                "mode": (["NORMAL", "SINGLE_PERSON"], {
-                    "default": "NORMAL",
-                    "tooltip": "NORMAL: full control | SINGLE_PERSON: low noise only uses start frame"
-                }),
-                "start_image": ("IMAGE",),
-                "middle_image": ("IMAGE",),
-                "end_image": ("IMAGE",),
-                "middle_frame_ratio": ("FLOAT", {
-                    "default": 0.5,
-                    "min": 0.0,
-                    "max": 1.0,
-                    "step": 0.01,
-                    "display": "slider",
-                }),
-                "high_noise_mid_strength": ("FLOAT", {
-                    "default": 0.8,
-                    "min": 0.0,
-                    "max": 1.0,
-                    "step": 0.05,
-                    "display": "slider",
-                    "tooltip": "High noise middle frame constraint strength"
-                }),
-                "low_noise_start_strength": ("FLOAT", {
-                    "default": 1.0,
-                    "min": 0.0,
-                    "max": 1.0,
-                    "step": 0.05,
-                    "display": "slider",
-                }),
-                "low_noise_mid_strength": ("FLOAT", {
-                    "default": 0.2,
-                    "min": 0.0,
-                    "max": 1.0,
-                    "step": 0.05,
-                    "display": "slider",
-                    "tooltip": "Low noise middle frame constraint strength"
-                }),
-                "low_noise_end_strength": ("FLOAT", {
-                    "default": 1.0,
-                    "min": 0.0,
-                    "max": 1.0,
-                    "step": 0.05,
-                    "display": "slider",
-                }),
-                "clip_vision_start_image": ("CLIP_VISION_OUTPUT",),
-                "clip_vision_middle_image": ("CLIP_VISION_OUTPUT",),
-                "clip_vision_end_image": ("CLIP_VISION_OUTPUT",),
-            },
-        }
-
-    RETURN_TYPES = ("CONDITIONING", "CONDITIONING", "CONDITIONING", "LATENT")
-    RETURN_NAMES = ("positive_high_noise", "positive_low_noise", "negative", "latent")
-    FUNCTION = "generate"
-    CATEGORY = "ComfyUI-Wan22FMLF"
-
-    def generate(
-        self,
-        positive: Tuple[Any, ...],
-        negative: Tuple[Any, ...],
-        vae: Any,
-        width: int,
-        height: int,
-        length: int,
-        batch_size: int,
-        mode: str = "NORMAL",
-        start_image: Optional[torch.Tensor] = None,
-        middle_image: Optional[torch.Tensor] = None,
-        end_image: Optional[torch.Tensor] = None,
-        middle_frame_ratio: float = 0.5,
-        high_noise_mid_strength: float = 0.8,
-        low_noise_start_strength: float = 1.0,
-        low_noise_mid_strength: float = 0.2,
-        low_noise_end_strength: float = 1.0,
-        clip_vision_start_image: Optional[Any] = None,
-        clip_vision_middle_image: Optional[Any] = None,
-        clip_vision_end_image: Optional[Any] = None
-    ) -> Tuple[Tuple[Any, ...], Tuple[Any, ...], Tuple[Any, ...], dict]:
-
+    def execute(
+        cls,
+        positive,
+        negative,
+        vae,
+        width,
+        height,
+        length,
+        batch_size,
+        mode="NORMAL",
+        start_image=None,
+        middle_image=None,
+        end_image=None,
+        middle_frame_ratio=0.5,
+        high_noise_mid_strength=0.8,
+        low_noise_start_strength=1.0,
+        low_noise_mid_strength=0.2,
+        low_noise_end_strength=1.0,
+        clip_vision_start_image=None,
+        clip_vision_middle_image=None,
+        clip_vision_end_image=None,
+    ):
         spacial_scale = vae.spacial_compression_encode()
         latent_channels = vae.latent_channels
         latent_t = ((length - 1) // 4) + 1
@@ -150,7 +189,7 @@ class WanFirstMiddleLastFrameToVideo:
             device=device
         )
 
-        middle_idx = self._calculate_aligned_position(middle_frame_ratio, length)
+        middle_idx = cls._calculate_aligned_position(middle_frame_ratio, length)
         middle_idx = max(4, min(middle_idx, length - 5))
 
         mask_high_noise = mask_base.clone()
@@ -231,13 +270,13 @@ class WanFirstMiddleLastFrameToVideo:
             "concat_mask": mask_low_reshaped
         })
 
-        # 修复：negative也设置图像条件（使用high noise的条件）
+        
         negative_out = node_helpers.conditioning_set_values(negative, {
             "concat_latent_image": concat_latent_image,
             "concat_mask": mask_high_reshaped
         })
 
-        clip_vision_output = self._merge_clip_vision_outputs(
+        clip_vision_output = cls._merge_clip_vision_outputs(
             clip_vision_start_image,
             clip_vision_middle_image,
             clip_vision_end_image
@@ -248,7 +287,7 @@ class WanFirstMiddleLastFrameToVideo:
                 positive_low_noise,
                 {"clip_vision_output": clip_vision_output}
             )
-            # 修复：negative也应用clip_vision_output
+            
             negative_out = node_helpers.conditioning_set_values(
                 negative_out,
                 {"clip_vision_output": clip_vision_output}
@@ -256,16 +295,18 @@ class WanFirstMiddleLastFrameToVideo:
 
         out_latent = {"samples": latent}
 
-        return (positive_high_noise, positive_low_noise, negative_out, out_latent)
+        return io.NodeOutput(positive_high_noise, positive_low_noise, negative_out, out_latent)
 
-    def _calculate_aligned_position(self, ratio: float, total_frames: int) -> int:
+    @classmethod
+    def _calculate_aligned_position(cls, ratio, total_frames):
         desired_idx = int(total_frames * ratio)
         latent_idx = desired_idx // 4
         aligned_idx = latent_idx * 4
         aligned_idx = max(0, min(aligned_idx, total_frames - 1))
         return aligned_idx
 
-    def _merge_clip_vision_outputs(self, *outputs: Any) -> Optional[Any]:
+    @classmethod
+    def _merge_clip_vision_outputs(cls, *outputs):
         valid_outputs = [o for o in outputs if o is not None]
 
         if not valid_outputs:
@@ -281,11 +322,3 @@ class WanFirstMiddleLastFrameToVideo:
         result.penultimate_hidden_states = combined_states
         return result
 
-
-NODE_CLASS_MAPPINGS = {
-    "WanFirstMiddleLastFrameToVideo": WanFirstMiddleLastFrameToVideo
-}
-
-NODE_DISPLAY_NAME_MAPPINGS = {
-    "WanFirstMiddleLastFrameToVideo": "Wan First-Middle-Last Frame to Video"
-}
