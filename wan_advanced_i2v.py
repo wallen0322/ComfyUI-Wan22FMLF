@@ -10,6 +10,12 @@ from typing import Optional, Tuple, Any
 
 class WanAdvancedI2V(io.ComfyNode):
     
+    RETURN_TYPES = ("CONDITIONING", "CONDITIONING", "CONDITIONING", "LATENT", "LATENT", "IMAGE", "INT")
+    RETURN_NAMES = ("positive_high", "positive_low", "negative", "latent", "trim_latent", "trim_image", "next_offset")
+    CATEGORY = "ComfyUI-Wan22FMLF"
+    FUNCTION = "execute"
+    OUTPUT_NODE = False
+    
     @classmethod
     def define_schema(cls) -> io.Schema:
         return io.Schema(
@@ -43,13 +49,13 @@ class WanAdvancedI2V(io.ComfyNode):
                 io.Boolean.Input("enable_middle_frame", default=True, optional=True),
             ],
             outputs=[
-                io.Conditioning.Output("positive_high_noise"),
-                io.Conditioning.Output("positive_low_noise"),
-                io.Conditioning.Output("negative_out"),
-                io.Latent.Output("latent"),
-                io.Int.Output("trim_latent"),
-                io.Int.Output("trim_image"),
-                io.Int.Output("next_offset"),
+                io.Conditioning.Output(display_name="positive_high"),
+                io.Conditioning.Output(display_name="positive_low"),
+                io.Conditioning.Output(display_name="negative"),
+                io.Latent.Output(display_name="latent"),
+                io.Latent.Output(display_name="trim_latent"),
+                io.Image.Output(display_name="trim_image"),
+                io.Int.Output(display_name="next_offset"),
             ],
         )
 
@@ -291,7 +297,7 @@ class WanAdvancedI2V(io.ComfyNode):
         
         out_latent = {"samples": latent}
         
-        return (positive_high_noise, positive_low_noise, negative_out, out_latent,
+        return io.NodeOutput(positive_high_noise, positive_low_noise, negative_out, out_latent,
                 trim_latent, trim_image, next_offset)
     
     @classmethod
@@ -341,12 +347,12 @@ class WanAdvancedExtractLastFrames(io.ComfyNode):
     def execute(cls, samples, num_frames):
         if num_frames == 0:
             out = {"samples": torch.zeros_like(samples["samples"][:, :, :0])}
-            return (out,)
+            return io.NodeOutput(out)
         
         latent_frames = ((num_frames - 1) // 4) + 1
         last_latent = samples["samples"][:, :, -latent_frames:].clone()
         out = {"samples": last_latent}
-        return (out,)
+        return io.NodeOutput(out)
 
 
 class WanAdvancedExtractLastImages(io.ComfyNode):
@@ -370,7 +376,7 @@ class WanAdvancedExtractLastImages(io.ComfyNode):
     def execute(cls, images, num_frames):
         if num_frames == 0:
             last_images = images[:0].clone()
-            return (last_images,)
+            return io.NodeOutput(last_images)
         
         last_images = images[-num_frames:].clone()
-        return (last_images,)
+        return io.NodeOutput(last_images)
