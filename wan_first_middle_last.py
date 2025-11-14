@@ -264,6 +264,12 @@ class WanFirstMiddleLastFrameToVideo(io.ComfyNode):
             "concat_mask": mask_low_reshaped
         })
 
+        # 修复：negative也设置图像条件（使用high noise的条件）
+        negative_out = node_helpers.conditioning_set_values(negative, {
+            "concat_latent_image": concat_latent_image,
+            "concat_mask": mask_high_reshaped
+        })
+
         clip_vision_output = cls._merge_clip_vision_outputs(
             clip_vision_start_image,
             clip_vision_middle_image,
@@ -275,10 +281,15 @@ class WanFirstMiddleLastFrameToVideo(io.ComfyNode):
                 positive_low_noise,
                 {"clip_vision_output": clip_vision_output}
             )
+            # 修复：negative也应用clip_vision_output
+            negative_out = node_helpers.conditioning_set_values(
+                negative_out,
+                {"clip_vision_output": clip_vision_output}
+            )
 
         out_latent = {"samples": latent}
 
-        return (positive_high_noise, positive_low_noise, negative, out_latent)
+        return (positive_high_noise, positive_low_noise, negative_out, out_latent)
 
     @classmethod
     def _calculate_aligned_position(cls, ratio, total_frames):
