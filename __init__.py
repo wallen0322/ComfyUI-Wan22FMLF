@@ -15,6 +15,9 @@ from comfy_api.latest import ComfyExtension
 
 from .wan_first_middle_last import WanFirstMiddleLastFrameToVideo
 from .wan_multi_frame import WanMultiFrameRefToVideo
+from .wan_multi_image_loader import WanMultiImageLoader
+
+WEB_DIRECTORY = "./js"
 
 HAS_4FRAME = False
 HAS_ADVANCED = False
@@ -42,6 +45,7 @@ class WanVideoExtension(ComfyExtension):
         nodes = [
             WanFirstMiddleLastFrameToVideo,
             WanMultiFrameRefToVideo,
+            WanMultiImageLoader,
         ]
         
         if HAS_4FRAME:
@@ -59,3 +63,6 @@ class WanVideoExtension(ComfyExtension):
 
 async def comfy_entrypoint():
     return WanVideoExtension()
+
+
+__all__ = ['WEB_DIRECTORY']
