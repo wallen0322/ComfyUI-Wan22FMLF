@@ -40,7 +40,7 @@ class WanAdvancedI2V(io.ComfyNode):
                 io.ClipVisionOutput.Input("clip_vision_start_image", optional=True),
                 io.ClipVisionOutput.Input("clip_vision_middle_image", optional=True),
                 io.ClipVisionOutput.Input("clip_vision_end_image", optional=True),
-                io.Bool.Input("enable_middle_frame", default=True, optional=True),
+                io.Boolean.Input("enable_middle_frame", default=True, optional=True),
             ],
             outputs=[
                 io.Conditioning.Output("positive_high_noise"),
