@@ -10,6 +10,12 @@ from typing import Optional, Tuple, Any
 
 class WanFourFrameReferenceUltimate(io.ComfyNode):
     
+    RETURN_TYPES = ("CONDITIONING", "CONDITIONING", "CONDITIONING", "LATENT")
+    RETURN_NAMES = ("positive_high", "positive_low", "negative", "latent")
+    CATEGORY = "ComfyUI-Wan22FMLF"
+    FUNCTION = "execute"
+    OUTPUT_NODE = False
+    
     @classmethod
     def define_schema(cls) -> io.Schema:
         return io.Schema(
@@ -43,10 +49,10 @@ class WanFourFrameReferenceUltimate(io.ComfyNode):
                 io.ClipVisionOutput.Input("clip_vision_frame_4", optional=True),
             ],
             outputs=[
-                io.Conditioning.Output("positive_high_noise"),
-                io.Conditioning.Output("positive_low_noise"),
-                io.Conditioning.Output("negative_out"),
-                io.Latent.Output("latent"),
+                io.Conditioning.Output(display_name="positive_high"),
+                io.Conditioning.Output(display_name="positive_low"),
+                io.Conditioning.Output(display_name="negative"),
+                io.Latent.Output(display_name="latent"),
             ],
         )
 
@@ -207,7 +213,7 @@ class WanFourFrameReferenceUltimate(io.ComfyNode):
             negative_out = node_helpers.conditioning_set_values(negative_out, 
                                                              {"clip_vision_output": clip_vision_output})
         
-        return (positive_high_noise, positive_low_noise, negative_out, {"samples": latent})
+        return io.NodeOutput(positive_high_noise, positive_low_noise, negative_out, {"samples": latent})
 
     @classmethod
     def _merge_clip_vision_outputs(cls, *outputs):
