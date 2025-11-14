@@ -8,6 +8,7 @@ Nodes:
 2. WanMultiFrameRefToVideo - N-frame universal reference node
 3. WanFourFrameReferenceUltimate - 4-frame reference with adjustable placeholder
 4. WanAdvancedI2V - Ultimate unified node with all features (includes automatic chaining)
+5. WanMultiImageLoader - Load multiple images with UI for batch selection and preview
 """
 
 from typing_extensions import override
