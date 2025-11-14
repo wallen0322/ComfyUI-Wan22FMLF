@@ -1,20 +1,11 @@
-# -*- coding: utf-8 -*-
-"""
-Wan Video Reference Nodes
-Multi-frame reference conditioning for Wan2.2 A14B I2V models
-
-Nodes:
-1. WanFirstMiddleLastFrameToVideo - 3-frame reference with flexible positioning
-2. WanMultiFrameRefToVideo - N-frame universal reference node
-3. WanFourFrameReferenceUltimate - 4-frame reference with adjustable placeholder
-4. WanAdvancedI2V - Ultimate unified node with all features (includes automatic chaining)
-"""
-
 from typing_extensions import override
 from comfy_api.latest import ComfyExtension
 
 from .wan_first_middle_last import WanFirstMiddleLastFrameToVideo
 from .wan_multi_frame import WanMultiFrameRefToVideo
+from .wan_multi_image_loader import WanMultiImageLoader
+
+WEB_DIRECTORY = "./js"
 
 HAS_4FRAME = False
 HAS_ADVANCED = False
@@ -42,6 +33,7 @@ class WanVideoExtension(ComfyExtension):
         nodes = [
             WanFirstMiddleLastFrameToVideo,
             WanMultiFrameRefToVideo,
+            WanMultiImageLoader,
         ]
         
         if HAS_4FRAME:
@@ -59,3 +51,6 @@ class WanVideoExtension(ComfyExtension):
 
 async def comfy_entrypoint():
     return WanVideoExtension()
+
+
+__all__ = ['WEB_DIRECTORY']
