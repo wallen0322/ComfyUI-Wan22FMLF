@@ -180,11 +180,18 @@ class WanMultiFrameRefToVideo(io.ComfyNode):
             "concat_mask": mask_low_reshaped
         })
         
-        negative_out = negative
+        
+        negative_out = node_helpers.conditioning_set_values(negative, {
+            "concat_latent_image": concat_latent_image_high,
+            "concat_mask": mask_high_reshaped
+        })
         
         if clip_vision_output is not None:
             positive_low_noise = node_helpers.conditioning_set_values(positive_low_noise, 
                                                                    {"clip_vision_output": clip_vision_output})
+            
+            negative_out = node_helpers.conditioning_set_values(negative_out, 
+                                                             {"clip_vision_output": clip_vision_output})
         
         return (positive_high_noise, positive_low_noise, negative_out, {"samples": latent})
 
