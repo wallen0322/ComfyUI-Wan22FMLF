@@ -37,6 +37,7 @@ class WanMultiFrameRefToVideo(io.ComfyNode):
                 io.Float.Input("ref_strength_low", default=0.2, min=0.0, max=1.0, step=0.05, round=0.01, display_mode=io.NumberDisplay.slider, optional=True),
                 io.Float.Input("end_frame_strength_high", default=1.0, min=0.0, max=1.0, step=0.05, round=0.01, display_mode=io.NumberDisplay.slider, optional=True),
                 io.Float.Input("end_frame_strength_low", default=1.0, min=0.0, max=1.0, step=0.05, round=0.01, display_mode=io.NumberDisplay.slider, optional=True),
+                io.Float.Input("motion_amplitude", default=1.0, min=0.0, max=3.0, step=0.1, round=0.01, display_mode=io.NumberDisplay.slider, optional=True),
                 io.ClipVisionOutput.Input("clip_vision_output", optional=True),
             ],
             outputs=[
@@ -50,7 +51,7 @@ class WanMultiFrameRefToVideo(io.ComfyNode):
     @classmethod
     def execute(cls, positive, negative, vae, width, height, length, batch_size, ref_images,
                 mode="NORMAL", ref_positions="", ref_strength_high=0.8, ref_strength_low=0.2,
-                end_frame_strength_high=1.0, end_frame_strength_low=1.0, clip_vision_output=None):
+                end_frame_strength_high=1.0, end_frame_strength_low=1.0, motion_amplitude=1.0, clip_vision_output=None):
         
         spacial_scale = vae.spacial_compression_encode()
         latent_channels = vae.latent_channels
