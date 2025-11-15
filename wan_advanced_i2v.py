@@ -10,7 +10,7 @@ from typing import Optional, Tuple, Any
 
 class WanAdvancedI2V(io.ComfyNode):
     
-    RETURN_TYPES = ("CONDITIONING", "CONDITIONING", "CONDITIONING", "LATENT", "LATENT", "IMAGE", "INT")
+    RETURN_TYPES = ("CONDITIONING", "CONDITIONING", "CONDITIONING", "LATENT", "INT", "INT", "INT")
     RETURN_NAMES = ("positive_high", "positive_low", "negative", "latent", "trim_latent", "trim_image", "next_offset")
     CATEGORY = "ComfyUI-Wan22FMLF"
     FUNCTION = "execute"
@@ -53,8 +53,8 @@ class WanAdvancedI2V(io.ComfyNode):
                 io.Conditioning.Output(display_name="positive_low"),
                 io.Conditioning.Output(display_name="negative"),
                 io.Latent.Output(display_name="latent"),
-                io.Latent.Output(display_name="trim_latent"),
-                io.Image.Output(display_name="trim_image"),
+                io.Int.Output(display_name="trim_latent"),
+                io.Int.Output(display_name="trim_image"),
                 io.Int.Output(display_name="next_offset"),
             ],
         )
