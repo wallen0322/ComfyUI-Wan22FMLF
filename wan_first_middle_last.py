@@ -235,6 +235,55 @@ class WanFirstMiddleLastFrameToVideo(io.ComfyNode):
 
         concat_latent_image = vae.encode(image[:, :, :, :3])
         
+        if length > 4 and middle_image is not None:
+            protect_zone_size = 6
+            
+            if start_image is not None and middle_image is not None:
+                start_end = start_image.shape[0] + 3
+                mid_protect_start = max(start_end, middle_idx - protect_zone_size)
+                
+                if mid_protect_start > start_end:
+                    transition_length = mid_protect_start - start_end
+                    
+                    for frame_idx in range(start_end, mid_protect_start):
+                        current_mask = mask_low_noise[:, :, frame_idx, :, :]
+                        
+                        distance_to_start = (frame_idx - start_end) / max(1.0, transition_length)
+                        distance_to_mid = abs(frame_idx - middle_idx) / max(1.0, protect_zone_size)
+                        
+                        time_weight = 1.0 - distance_to_start * 0.2
+                        protect_weight = max(0.5, 1.0 - distance_to_mid)
+                        
+                        smooth_factor = time_weight * protect_weight
+                        base_mask_value = 1.0 - low_noise_start_strength
+                        target_mask_value = 1.0 - low_noise_mid_strength
+                        smooth_mask_value = base_mask_value + (target_mask_value - base_mask_value) * (1.0 - smooth_factor)
+                        
+                        mask_low_noise[:, :, frame_idx, :, :] = smooth_mask_value
+            
+            if middle_image is not None and end_image is not None:
+                mid_protect_end = middle_idx + protect_zone_size
+                end_start = length - end_image.shape[0]
+                
+                if end_start > mid_protect_end:
+                    transition_length = end_start - mid_protect_end
+                    
+                    for frame_idx in range(mid_protect_end, end_start):
+                        current_mask = mask_low_noise[:, :, frame_idx, :, :]
+                        
+                        distance_to_mid = abs(frame_idx - middle_idx) / max(1.0, protect_zone_size)
+                        distance_to_end = (end_start - frame_idx) / max(1.0, transition_length)
+                        
+                        protect_weight = max(0.5, 1.0 - distance_to_mid) if frame_idx < middle_idx + protect_zone_size else 1.0
+                        time_weight = 1.0 - distance_to_end * 0.2
+                        
+                        smooth_factor = time_weight * protect_weight
+                        base_mask_value = 1.0 - low_noise_mid_strength
+                        target_mask_value = 1.0 - low_noise_end_strength
+                        smooth_mask_value = base_mask_value + (target_mask_value - base_mask_value) * (1.0 - smooth_factor)
+                        
+                        mask_low_noise[:, :, frame_idx, :, :] = smooth_mask_value
+        
         if structural_repulsion_boost > 1.001 and length > 4:
             mask_h, mask_w = mask_high_noise.shape[-2], mask_high_noise.shape[-1]
             boost_factor = structural_repulsion_boost - 1.0
@@ -266,13 +315,27 @@ class WanFirstMiddleLastFrameToVideo(io.ComfyNode):
                 
                 if spatial_gradient_1 is not None:
                     start_end = start_image.shape[0] + 3
-                    mid_protect_start = max(start_end, middle_idx - 4)
-                    mid_protect_end = middle_idx + 5
+                    protect_zone_size = 6
+                    mid_protect_start = max(start_end, middle_idx - protect_zone_size)
+                    mid_protect_center = middle_idx
                     transition_end = min(mid_protect_start, length)
                     
-                    for frame_idx in range(start_end, transition_end):
-                        current_mask = mask_high_noise[:, :, frame_idx, :, :]
-                        mask_high_noise[:, :, frame_idx, :, :] = current_mask * spatial_gradient_1
+                    if transition_end > start_end:
+                        transition_length = transition_end - start_end
+                        
+                        for frame_idx in range(start_end, transition_end):
+                            current_mask = mask_high_noise[:, :, frame_idx, :, :]
+                            
+                            distance_to_start = (frame_idx - start_end) / max(1.0, transition_length)
+                            distance_to_mid = abs(frame_idx - mid_protect_center) / max(1.0, protect_zone_size)
+                            
+                            time_weight = 1.0 - distance_to_start * 0.3
+                            protect_weight = max(0.3, 1.0 - distance_to_mid) if frame_idx < mid_protect_center else 1.0
+                            
+                            combined_weight = time_weight * protect_weight
+                            adjusted_gradient = 1.0 - (1.0 - spatial_gradient_1) * combined_weight
+                            
+                            mask_high_noise[:, :, frame_idx, :, :] = current_mask * adjusted_gradient
             
             if middle_image is not None and end_image is not None:
                 mid_img = middle_image[0:1].to(device)
@@ -281,13 +344,27 @@ class WanFirstMiddleLastFrameToVideo(io.ComfyNode):
                 spatial_gradient_2 = create_spatial_gradient(mid_img, end_img)
                 
                 if spatial_gradient_2 is not None:
-                    mid_protect_end = middle_idx + 5
+                    protect_zone_size = 6
+                    mid_protect_end = middle_idx + protect_zone_size
                     transition_start = mid_protect_end
                     end_start = length - end_image.shape[0]
                     
-                    for frame_idx in range(transition_start, end_start):
-                        current_mask = mask_high_noise[:, :, frame_idx, :, :]
-                        mask_high_noise[:, :, frame_idx, :, :] = current_mask * spatial_gradient_2
+                    if end_start > transition_start:
+                        transition_length = end_start - transition_start
+                        
+                        for frame_idx in range(transition_start, end_start):
+                            current_mask = mask_high_noise[:, :, frame_idx, :, :]
+                            
+                            distance_to_mid = abs(frame_idx - middle_idx) / max(1.0, protect_zone_size)
+                            distance_to_end = (end_start - frame_idx) / max(1.0, transition_length)
+                            
+                            protect_weight = max(0.5, 1.0 - distance_to_mid) if frame_idx < middle_idx + protect_zone_size else 1.0
+                            time_weight = 1.0 - distance_to_end * 0.3
+                            
+                            combined_weight = time_weight * protect_weight
+                            adjusted_gradient = 1.0 - (1.0 - spatial_gradient_2) * combined_weight
+                            
+                            mask_high_noise[:, :, frame_idx, :, :] = current_mask * adjusted_gradient
             
             if start_image is not None and end_image is not None and middle_image is None:
                 start_img = start_image[0:1].to(device)
@@ -299,9 +376,18 @@ class WanFirstMiddleLastFrameToVideo(io.ComfyNode):
                     start_end = start_image.shape[0] + 3
                     end_start = length - end_image.shape[0]
                     
-                    for frame_idx in range(start_end, end_start):
-                        current_mask = mask_high_noise[:, :, frame_idx, :, :]
-                        mask_high_noise[:, :, frame_idx, :, :] = current_mask * spatial_gradient
+                    if end_start > start_end:
+                        transition_length = end_start - start_end
+                        
+                        for frame_idx in range(start_end, end_start):
+                            current_mask = mask_high_noise[:, :, frame_idx, :, :]
+                            
+                            distance_from_start = (frame_idx - start_end) / max(1.0, transition_length)
+                            time_weight = 0.5 + 0.5 * (1.0 - abs(distance_from_start - 0.5) * 2.0)
+                            
+                            adjusted_gradient = 1.0 - (1.0 - spatial_gradient) * time_weight
+                            
+                            mask_high_noise[:, :, frame_idx, :, :] = current_mask * adjusted_gradient
 
         if mode == "SINGLE_PERSON":
             image_low_only = torch.ones((length, height, width, 3), device=device) * 0.5
