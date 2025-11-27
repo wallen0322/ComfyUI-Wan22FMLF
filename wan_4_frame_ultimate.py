@@ -1,6 +1,7 @@
 from typing_extensions import override
 from comfy_api.latest import io
 import torch
+import torch.nn.functional as F
 import node_helpers
 import comfy
 import comfy.utils
@@ -43,6 +44,7 @@ class WanFourFrameReferenceUltimate(io.ComfyNode):
                 io.Float.Input("frame_3_strength_low", default=0.2, min=0.0, max=1.0, step=0.05, round=0.01, display_mode=io.NumberDisplay.slider, optional=True),
                 io.Combo.Input("enable_frame_3", ["disable", "enable"], default="enable", optional=True),
                 io.Image.Input("frame_4_image", optional=True),
+                io.Float.Input("structural_repulsion_boost", default=1.0, min=1.0, max=2.0, step=0.05, round=0.01, display_mode=io.NumberDisplay.slider, optional=True, tooltip="Motion enhancement through spatial gradient conditioning. Only affects high-noise stage."),
                 io.ClipVisionOutput.Input("clip_vision_frame_1", optional=True),
                 io.ClipVisionOutput.Input("clip_vision_frame_2", optional=True),
                 io.ClipVisionOutput.Input("clip_vision_frame_3", optional=True),
@@ -62,6 +64,7 @@ class WanFourFrameReferenceUltimate(io.ComfyNode):
                 frame_2_strength_high=0.8, frame_2_strength_low=0.2, enable_frame_2="enable",
                 frame_3_image=None, frame_3_ratio=0.67, frame_3_strength_high=0.8,
                 frame_3_strength_low=0.2, enable_frame_3="enable", frame_4_image=None,
+                structural_repulsion_boost=1.0,
                 clip_vision_frame_1=None, clip_vision_frame_2=None,
                 clip_vision_frame_3=None, clip_vision_frame_4=None):
         
@@ -149,6 +152,56 @@ class WanFourFrameReferenceUltimate(io.ComfyNode):
             mask_low_noise[:, :, frame_4_idx:frame_4_idx + frame_4_image.shape[0] + 3] = 0.0
         
         concat_latent_image_high = vae.encode(image[:, :, :, :3])
+        
+        if structural_repulsion_boost > 1.001 and length > 4:
+            mask_h, mask_w = mask_high_noise.shape[-2], mask_high_noise.shape[-1]
+            boost_factor = structural_repulsion_boost - 1.0
+            
+            def create_spatial_gradient(img1, img2):
+                if img1 is None or img2 is None:
+                    return None
+                
+                motion_diff = torch.abs(img2[0] - img1[0]).mean(dim=-1, keepdim=False)
+                motion_diff_4d = motion_diff.unsqueeze(0).unsqueeze(0)
+                motion_diff_scaled = F.interpolate(
+                    motion_diff_4d,
+                    size=(mask_h, mask_w),
+                    mode='bilinear',
+                    align_corners=False
+                )
+                
+                motion_normalized = (motion_diff_scaled - motion_diff_scaled.min()) / (motion_diff_scaled.max() - motion_diff_scaled.min() + 1e-8)
+                
+                spatial_gradient = 1.0 - motion_normalized * boost_factor * 2.5
+                spatial_gradient = torch.clamp(spatial_gradient, 0.02, 1.0)
+                return spatial_gradient[0, 0]
+            
+            frames = [
+                (frame_1_image, frame_1_idx) if frame_1_image is not None else (None, None),
+                (frame_2_image, frame_2_idx) if frame_2_image is not None and enable_frame_2 == "enable" else (None, None),
+                (frame_3_image, frame_3_idx) if frame_3_image is not None and enable_frame_3 == "enable" else (None, None),
+                (frame_4_image, frame_4_idx) if frame_4_image is not None else (None, None),
+            ]
+            
+            valid_frames = [(img, idx) for img, idx in frames if img is not None and idx is not None]
+            
+            for i in range(len(valid_frames) - 1):
+                img1, pos1 = valid_frames[i]
+                img2, pos2 = valid_frames[i + 1]
+                
+                if pos2 > pos1 + 4:
+                    start_end = pos1 + 4
+                    end_start = pos2
+                    protect_start = pos2 - 4
+                    
+                    spatial_gradient = create_spatial_gradient(img1[0:1].to(device), img2[0:1].to(device))
+                    
+                    if spatial_gradient is not None:
+                        transition_end = min(protect_start, end_start)
+                        
+                        for frame_idx in range(start_end, transition_end):
+                            current_mask = mask_high_noise[:, :, frame_idx, :, :]
+                            mask_high_noise[:, :, frame_idx, :, :] = current_mask * spatial_gradient
         
         if mode == "SINGLE_PERSON":
             mask_low_noise = mask_base.clone()

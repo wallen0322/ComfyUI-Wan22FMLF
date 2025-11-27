@@ -1,6 +1,7 @@
 from typing_extensions import override
 from comfy_api.latest import ComfyExtension, io
 import torch
+import torch.nn.functional as F
 import node_helpers
 import comfy
 import comfy.utils
@@ -110,6 +111,16 @@ class WanFirstMiddleLastFrameToVideo(io.ComfyNode):
                     display_mode=io.NumberDisplay.slider,
                     optional=True,
                 ),
+                io.Float.Input(
+                    "structural_repulsion_boost",
+                    default=1.0,
+                    min=1.0,
+                    max=2.0,
+                    step=0.05,
+                    round=0.01,
+                    display_mode=io.NumberDisplay.slider,
+                    optional=True,
+                ),
                 io.ClipVisionOutput.Input("clip_vision_start_image", optional=True),
                 io.ClipVisionOutput.Input("clip_vision_middle_image", optional=True),
                 io.ClipVisionOutput.Input("clip_vision_end_image", optional=True),
@@ -141,6 +152,7 @@ class WanFirstMiddleLastFrameToVideo(io.ComfyNode):
         low_noise_start_strength=1.0,
         low_noise_mid_strength=0.2,
         low_noise_end_strength=1.0,
+        structural_repulsion_boost=1.0,
         clip_vision_start_image=None,
         clip_vision_middle_image=None,
         clip_vision_end_image=None,
@@ -222,6 +234,74 @@ class WanFirstMiddleLastFrameToVideo(io.ComfyNode):
             mask_low_noise[:, :, -end_image.shape[0]:] = low_end_mask_value
 
         concat_latent_image = vae.encode(image[:, :, :, :3])
+        
+        if structural_repulsion_boost > 1.001 and length > 4:
+            mask_h, mask_w = mask_high_noise.shape[-2], mask_high_noise.shape[-1]
+            boost_factor = structural_repulsion_boost - 1.0
+            
+            def create_spatial_gradient(img1, img2):
+                if img1 is None or img2 is None:
+                    return None
+                
+                motion_diff = torch.abs(img2[0] - img1[0]).mean(dim=-1, keepdim=False)
+                motion_diff_4d = motion_diff.unsqueeze(0).unsqueeze(0)
+                motion_diff_scaled = F.interpolate(
+                    motion_diff_4d,
+                    size=(mask_h, mask_w),
+                    mode='bilinear',
+                    align_corners=False
+                )
+                
+                motion_normalized = (motion_diff_scaled - motion_diff_scaled.min()) / (motion_diff_scaled.max() - motion_diff_scaled.min() + 1e-8)
+                
+                spatial_gradient = 1.0 - motion_normalized * boost_factor * 2.5
+                spatial_gradient = torch.clamp(spatial_gradient, 0.02, 1.0)
+                return spatial_gradient[0, 0]
+            
+            if start_image is not None and middle_image is not None:
+                start_img = start_image[0:1].to(device)
+                mid_img = middle_image[0:1].to(device)
+                
+                spatial_gradient_1 = create_spatial_gradient(start_img, mid_img)
+                
+                if spatial_gradient_1 is not None:
+                    start_end = start_image.shape[0] + 3
+                    mid_protect_start = max(start_end, middle_idx - 4)
+                    mid_protect_end = middle_idx + 5
+                    transition_end = min(mid_protect_start, length)
+                    
+                    for frame_idx in range(start_end, transition_end):
+                        current_mask = mask_high_noise[:, :, frame_idx, :, :]
+                        mask_high_noise[:, :, frame_idx, :, :] = current_mask * spatial_gradient_1
+            
+            if middle_image is not None and end_image is not None:
+                mid_img = middle_image[0:1].to(device)
+                end_img = end_image[-1:].to(device)
+                
+                spatial_gradient_2 = create_spatial_gradient(mid_img, end_img)
+                
+                if spatial_gradient_2 is not None:
+                    mid_protect_end = middle_idx + 5
+                    transition_start = mid_protect_end
+                    end_start = length - end_image.shape[0]
+                    
+                    for frame_idx in range(transition_start, end_start):
+                        current_mask = mask_high_noise[:, :, frame_idx, :, :]
+                        mask_high_noise[:, :, frame_idx, :, :] = current_mask * spatial_gradient_2
+            
+            if start_image is not None and end_image is not None and middle_image is None:
+                start_img = start_image[0:1].to(device)
+                end_img = end_image[-1:].to(device)
+                
+                spatial_gradient = create_spatial_gradient(start_img, end_img)
+                
+                if spatial_gradient is not None:
+                    start_end = start_image.shape[0] + 3
+                    end_start = length - end_image.shape[0]
+                    
+                    for frame_idx in range(start_end, end_start):
+                        current_mask = mask_high_noise[:, :, frame_idx, :, :]
+                        mask_high_noise[:, :, frame_idx, :, :] = current_mask * spatial_gradient
 
         if mode == "SINGLE_PERSON":
             image_low_only = torch.ones((length, height, width, 3), device=device) * 0.5
@@ -242,6 +322,7 @@ class WanFirstMiddleLastFrameToVideo(io.ComfyNode):
 
             concat_latent_image_low = vae.encode(image_low_only[:, :, :, :3])
         else:
+            # 低噪阶段使用原始 latent（不受运动增强影响）
             concat_latent_image_low = concat_latent_image
 
         mask_high_reshaped = mask_high_noise.view(
