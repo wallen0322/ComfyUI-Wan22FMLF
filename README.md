@@ -1,231 +1,334 @@
 # ComfyUI-Wan22FMLF
 
-Multi-frame reference conditioning nodes for Wan2.2 A14B I2V models.
+> Multi-frame reference conditioning nodes for Wan2.2 A14B I2V models.
 
-# 注意事项
-
-尽量使用官方模型，不要使用量化模型，新增单人模式可有效杜绝颜色累积和亮度闪烁，
-低分辨率推荐：480x832/832x480/576x1024
-高分辨率对剑：704x1280/1280x704
-注意：720*1280会导致中间帧闪烁问题，
-
-# 差异比较大的场景：
-如果是变化场景较大，（如变身等）可以切换为normal模式按以下参数设置，使用normal模式，并且低噪lightx2v的Lora权重需要降低到0.6左右，不然低噪会破坏掉你的变化效果。
-
-<img width="347" height="461" alt="ead76d24f88d3e773bdbfb34994addf8" src="https://github.com/user-attachments/assets/a2da0900-7439-4e57-a105-b6c772d5f6af" />
-
-# 如果你想做无限续杯多图参考长视频，推荐以下参数：
-
-<img width="539" height="833" alt="a95eec0897a6ac258917b989a0620bab" src="https://github.com/user-attachments/assets/86a2aaed-efd5-4e11-9bca-0518f9239c8f" />
-
-**更新3图循环工作流，增加一个可视化选择图片的节点，不用再去建文件夹和改图片名字了，更新立刻享受**
-
-<img width="1864" height="790" alt="b4c8bd757112957d576b03a1714b100e" src="https://github.com/user-attachments/assets/1e3665f4-a664-408e-a6b4-06ff9bfa0c8b" />
-
-
-# WanMultiFrameRefToVideo中ref_positions 参数使用说明
-
-## 概述
-`ref_positions` 用于指定参考帧在视频中的位置，支持多种格式。
-
-## 推荐参数
-
-<img width="662" height="895" alt="bc236db1b17c6d861b8c19f89602d2dc" src="https://github.com/user-attachments/assets/2c496ffc-f63e-4eca-b576-7c9d484f822d" />
----
-
-## 格式说明
-
-### 1. 留空（自动分布）
-```
-ref_positions: ""
-```
-- **效果**: 参考帧在视频中均匀分布
-- **示例**: 
-  - 3张图片，length=81 → 位置：0, 40, 80
-  - 6张图片，length=81 → 位置：0, 16, 32, 48, 64, 80
+一个为 Wan2.2 A14B I2V 模型提供多帧参考条件控制的 ComfyUI 自定义节点集合。
 
 ---
 
-### 2. 比例值（推荐）
-```
-ref_positions: "0, 0.2, 0.5, 0.8, 1.0"
-```
-- **范围**: 0.0 - 1.0（0%到100%）
-- **效果**: 按视频长度的比例定位
-- **计算**: `实际位置 = 比例 × (length - 1)`
-- **示例**: 
-  - length=81时
-  - 0.0 → 帧0
-  - 0.5 → 帧40
-  - 1.0 → 帧80
+## 📋 目录
+
+- [快速开始](#快速开始)
+- [节点说明](#节点说明)
+- [参数配置](#参数配置)
+- [使用建议](#使用建议)
+- [常见问题](#常见问题)
+- [更新日志](#更新日志)
 
 ---
 
-### 3. 绝对帧索引
-```
-ref_positions: "0, 20, 40, 60, 80"
-```
-- **范围**: 大于等于2的整数
-- **效果**: 直接指定帧位置
-- **注意**: 超出范围会自动裁剪到 [0, length-1]
+## 🚀 快速开始
+
+### 系统要求
+
+- 尽量使用**官方模型**，不要使用量化模型
+- 新增**单人模式**可有效杜绝颜色累积和亮度闪烁
+
+### 推荐分辨率
+
+#### 低分辨率推荐
+- `480×832`
+- `832×480`
+- `576×1024`
+
+#### 高分辨率推荐
+- `704×1280`
+- `1280×704`
+
+⚠️ **注意**：`720×1280` 会导致中间帧闪烁问题，不推荐使用。
 
 ---
 
-### 4. JSON 数组格式
-```
-ref_positions: "[0, 0.25, 0.5, 0.75, 1.0]"
-```
-- **格式**: 标准JSON数组
-- **支持**: 比例值或绝对值混用
-- **示例**: `[0, 20, 0.5, 60, 1.0]`
-
----
-
-## 实际应用示例
-
-### 示例1：3帧视频（首-中-尾）
-```
-length: 81
-ref_images: 3张图片
-ref_positions: ""           → 自动分布到 0, 40, 80
-ref_positions: "0, 0.5, 1"  → 精确定位到 0, 40, 80
-```
-
-### 示例2：5帧视频
-```
-length: 81
-ref_images: 5张图片
-ref_positions: "0, 0.25, 0.5, 0.75, 1"  → 位置: 0, 20, 40, 60, 80
-```
-
-### 示例3：6帧视频（自定义）
-```
-length: 81
-ref_images: 6张图片
-ref_positions: "0, 10, 25, 45, 65, 80"  → 绝对位置
-ref_positions: "0, 0.12, 0.31, 0.56, 0.81, 1"  → 比例位置
-```
-
-### 示例4：混合格式（不推荐但支持）
-```
-ref_positions: "[0, 20, 0.5, 60, 1.0]"  → 0, 20, 40, 60, 80
-```
-
----
-
-## 重要提示
-
-### 自动对齐
-- 所有位置会自动对齐到4的倍数（latent对齐）
-- 例如：帧15 → 对齐到帧12
-
-### 帧间距保护
-- 相邻帧自动保持至少4帧间距
-- 例如：如果帧16和帧18冲突 → 自动调整为16和20
-
-### 数量匹配
-- 如果位置数量少于图片数量：重复最后一个位置
-- 如果位置数量多于图片数量：截断多余位置
-
----
-
-## 推荐用法
-
-**最简单**: 留空，让系统自动分布
-```
-ref_positions: ""
-```
-
-**最灵活**: 使用比例值（0-1）
-```
-ref_positions: "0, 0.33, 0.67, 1"
-```
-
-**最精确**: 使用绝对帧索引
-```
-ref_positions: "0, 20, 40, 60, 80"
-```
-
----
-
-## 常见问题
-
-**Q: 我有6张图片，怎么均匀分布？**
-A: 留空即可，或使用 `"0, 0.2, 0.4, 0.6, 0.8, 1"`
-
-**Q: 比例值0.5和1哪个区别？**
-A: 
-- 0.5 = 50%位置 = 帧40（length=81时）
-- 1 = 100%位置 = 帧80（length=81时）
-- 1.0 也是100%
-
-**Q: 可以让某些帧更密集吗？**
-A: 可以，使用自定义位置：`"0, 10, 15, 20, 50, 80"`
-
-**Q: 位置会自动排序吗？**
-A: 不会，请按顺序输入位置值
-
-
----
-#DONT WORRY BE HAPPY
-建议高噪2步就够了，高噪步数太多会增加中间帧闪的概率
-
-20251031重大更新
-解决中间帧闪烁问题，请使用我更新的示例工作流，节点做了较大改变！
-建议高噪中间帧强度：06-0.8，低噪中间帧强度：0.2左右，如果复杂场景，低噪中间帧可直接设置为0
-
-
-## 🎬 Nodes
+## 🎬 节点说明
 
 ### 1. Wan First-Middle-Last Frame 🎬
 
-Generate videos with 3-frame reference: start, middle, and end frames.
+生成带有 3 帧参考的视频：起始帧、中间帧和结束帧。
 
-**Parameters:**
+**参数说明：**
 
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `positive` | CONDITIONING | Required | Positive prompt conditioning |
-| `negative` | CONDITIONING | Required | Negative prompt conditioning |
-| `vae` | VAE | Required | VAE model for encoding |
-| `width` | INT | 832 | Video width (multiple of 16) |
-| `height` | INT | 480 | Video height (multiple of 16) |
-| `length` | INT | 81 | Total frames (multiple of 4 + 1) |
-| `batch_size` | INT | 1 | Number of videos to generate |
-| `start_image` | IMAGE | Optional | First frame reference |
-| `middle_image` | IMAGE | Optional | Middle frame reference |
-| `end_image` | IMAGE | Optional | Last frame reference |
-| `middle_frame_ratio` | FLOAT | 0.5 | Middle frame position (0.0-1.0) |
-| `middle_frame_strength` | FLOAT | 0.5 | Middle frame constraint (0=loose, 1=fixed) |
-| `clip_vision_start_image` | CLIP_VISION_OUTPUT | Optional | CLIP Vision for start frame |
-| `clip_vision_middle_image` | CLIP_VISION_OUTPUT | Optional | CLIP Vision for middle frame |
-| `clip_vision_end_image` | CLIP_VISION_OUTPUT | Optional | CLIP Vision for end frame |
+| 参数 | 类型 | 默认值 | 说明 |
+|------|------|--------|------|
+| `positive` | CONDITIONING | **必需** | 正向提示词条件 |
+| `negative` | CONDITIONING | **必需** | 负向提示词条件 |
+| `vae` | VAE | **必需** | 用于编码的 VAE 模型 |
+| `width` | INT | 832 | 视频宽度（16 的倍数） |
+| `height` | INT | 480 | 视频高度（16 的倍数） |
+| `length` | INT | 81 | 总帧数（4 的倍数 + 1） |
+| `batch_size` | INT | 1 | 生成视频的数量 |
+| `start_image` | IMAGE | 可选 | 起始帧参考图 |
+| `middle_image` | IMAGE | 可选 | 中间帧参考图 |
+| `end_image` | IMAGE | 可选 | 结束帧参考图 |
+| `middle_frame_ratio` | FLOAT | 0.5 | 中间帧位置比例（0.0-1.0） |
+| `middle_frame_strength` | FLOAT | 0.5 | 中间帧约束强度（0=宽松，1=严格） |
+| `clip_vision_start_image` | CLIP_VISION_OUTPUT | 可选 | 起始帧的 CLIP Vision 输出 |
+| `clip_vision_middle_image` | CLIP_VISION_OUTPUT | 可选 | 中间帧的 CLIP Vision 输出 |
+| `clip_vision_end_image` | CLIP_VISION_OUTPUT | 可选 | 结束帧的 CLIP Vision 输出 |
 
 ---
 
 ### 2. Wan Multi-Frame Reference 🎞️
 
-Universal N-frame reference node supporting 2, 3, 4, or more reference frames with flexible positioning.
+支持 2、3、4 或更多参考帧的通用多帧参考节点，具有灵活的位置配置。
 
-**Parameters:**
+**参数说明：**
 
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `positive` | CONDITIONING | Required | Positive prompt conditioning |
-| `negative` | CONDITIONING | Required | Negative prompt conditioning |
-| `vae` | VAE | Required | VAE model for encoding |
-| `width` | INT | 832 | Video width (multiple of 16) |
-| `height` | INT | 480 | Video height (multiple of 16) |
-| `length` | INT | 81 | Total frames (multiple of 4 + 1) |
-| `batch_size` | INT | 1 | Number of videos to generate |
-| `ref_images` | IMAGE | Required | Reference frame images |
-| `ref_positions` | STRING | "" (auto) | Frame positions: "0,40,80" or "0,0.5,1.0" |
-| `ref_strength` | FLOAT | 0.5 | Constraint for middle frames (0-1) |
-| `fade_frames` | INT | 2 | Fade-out gradient frames (0-8) |
-| `clip_vision_output` | CLIP_VISION_OUTPUT | Optional | CLIP Vision output |
+| 参数 | 类型 | 默认值 | 说明 |
+|------|------|--------|------|
+| `positive` | CONDITIONING | **必需** | 正向提示词条件 |
+| `negative` | CONDITIONING | **必需** | 负向提示词条件 |
+| `vae` | VAE | **必需** | 用于编码的 VAE 模型 |
+| `width` | INT | 832 | 视频宽度（16 的倍数） |
+| `height` | INT | 480 | 视频高度（16 的倍数） |
+| `length` | INT | 81 | 总帧数（4 的倍数 + 1） |
+| `batch_size` | INT | 1 | 生成视频的数量 |
+| `ref_images` | IMAGE | **必需** | 参考帧图片 |
+| `ref_positions` | STRING | `""` (自动) | 帧位置：`"0,40,80"` 或 `"0,0.5,1.0"` |
+| `ref_strength` | FLOAT | 0.5 | 中间帧约束强度（0-1） |
+| `fade_frames` | INT | 2 | 淡出渐变帧数（0-8） |
+| `clip_vision_output` | CLIP_VISION_OUTPUT | 可选 | CLIP Vision 输出 |
 
-**Position Format:**
-- **Indices**: `"0,40,80"` - Specific frame numbers
-- **Ratios**: `"0,0.5,1.0"` - Relative positions (0.0-1.0)
-- **JSON**: `"[0, 40, 80]"` - Array format
-- **Auto**: Leave empty for even distribution
+---
+
+## ⚙️ 参数配置
+
+### `ref_positions` 参数使用说明
+
+`ref_positions` 用于指定参考帧在视频中的位置，支持多种格式。
+
+#### 格式说明
+
+##### 1️⃣ 留空（自动分布）⭐ 推荐
+
+```
+ref_positions: ""
+```
+
+- **效果**：参考帧在视频中均匀分布
+- **示例**：
+  - 3 张图片，length=81 → 位置：0, 40, 80
+  - 6 张图片，length=81 → 位置：0, 16, 32, 48, 64, 80
+
+---
+
+##### 2️⃣ 比例值（推荐）
+
+```
+ref_positions: "0, 0.2, 0.5, 0.8, 1.0"
+```
+
+- **范围**：0.0 - 1.0（0% 到 100%）
+- **效果**：按视频长度的比例定位
+- **计算**：`实际位置 = 比例 × (length - 1)`
+- **示例**（length=81 时）：
+  - `0.0` → 帧 0
+  - `0.5` → 帧 40
+  - `1.0` → 帧 80
+
+---
+
+##### 3️⃣ 绝对帧索引
+
+```
+ref_positions: "0, 20, 40, 60, 80"
+```
+
+- **范围**：大于等于 2 的整数
+- **效果**：直接指定帧位置
+- **注意**：超出范围会自动裁剪到 `[0, length-1]`
+
+---
+
+##### 4️⃣ JSON 数组格式
+
+```
+ref_positions: "[0, 0.25, 0.5, 0.75, 1.0]"
+```
+
+- **格式**：标准 JSON 数组
+- **支持**：比例值或绝对值混用
+- **示例**：`[0, 20, 0.5, 60, 1.0]`
+
+---
+
+#### 实际应用示例
+
+##### 示例 1：3 帧视频（首-中-尾）
+
+```yaml
+length: 81
+ref_images: 3张图片
+ref_positions: ""           # → 自动分布到 0, 40, 80
+ref_positions: "0, 0.5, 1"  # → 精确定位到 0, 40, 80
+```
+
+##### 示例 2：5 帧视频
+
+```yaml
+length: 81
+ref_images: 5张图片
+ref_positions: "0, 0.25, 0.5, 0.75, 1"  # → 位置: 0, 20, 40, 60, 80
+```
+
+##### 示例 3：6 帧视频（自定义）
+
+```yaml
+length: 81
+ref_images: 6张图片
+ref_positions: "0, 10, 25, 45, 65, 80"          # → 绝对位置
+ref_positions: "0, 0.12, 0.31, 0.56, 0.81, 1"   # → 比例位置
+```
+
+---
+
+#### 重要提示
+
+##### 自动对齐
+
+- 所有位置会自动对齐到 4 的倍数（latent 对齐）
+- **示例**：帧 15 → 对齐到帧 12
+
+##### 帧间距保护
+
+- 相邻帧自动保持至少 4 帧间距
+- **示例**：如果帧 16 和帧 18 冲突 → 自动调整为 16 和 20
+
+##### 数量匹配
+
+- 如果位置数量少于图片数量：重复最后一个位置
+- 如果位置数量多于图片数量：截断多余位置
+
+---
+
+#### 推荐用法
+
+**最简单** ⭐ 留空，让系统自动分布
+
+```
+ref_positions: ""
+```
+
+**最灵活** ⭐ 使用比例值（0-1）
+
+```
+ref_positions: "0, 0.33, 0.67, 1"
+```
+
+**最精确** ⭐ 使用绝对帧索引
+
+```
+ref_positions: "0, 20, 40, 60, 80"
+```
+
+---
+
+## 💡 使用建议
+
+### 场景配置
+
+#### 差异较大的场景（如变身等）
+
+如果场景变化较大，可以切换到 **normal 模式**，使用以下参数设置：
+
+- 使用 normal 模式
+- LightX2V 的 Lora 权重需要降低到 **0.6 左右**
+- 否则低噪会破坏你的变化效果
+
+![差异场景配置示例](https://github.com/user-attachments/assets/a2da0900-7439-4e57-a105-b6c772d5f6af)
+
+---
+
+#### 无限续杯多图参考长视频
+
+推荐以下参数配置：
+
+![长视频配置示例](https://github.com/user-attachments/assets/86a2aaed-efd5-4e11-9bca-0518f9239c8f)
+
+**✨ 更新**：3 图循环工作流，增加可视化选择图片的节点，不用再去建文件夹和改图片名字了，更新立刻享受！
+
+![可视化选择节点](https://github.com/user-attachments/assets/1e3665f4-a664-408e-a6b4-06ff9bfa0c8b)
+
+---
+
+### 噪点强度建议
+
+#### 高噪设置
+
+- **步数**：2 步就够了
+- ⚠️ 高噪步数太多会增加中间帧闪烁的概率
+
+#### 中间帧强度建议
+
+| 场景类型 | 高噪中间帧强度 | 低噪中间帧强度 |
+|----------|---------------|---------------|
+| 普通场景 | 0.6-0.8 | 0.2 左右 |
+| 复杂场景 | 0.6-0.8 | 0（可直接设置为 0） |
+
+---
+
+## ❓ 常见问题
+
+### 关于 `ref_positions` 参数
+
+**Q: 我有 6 张图片，怎么均匀分布？**
+
+A: 留空即可，或使用 `"0, 0.2, 0.4, 0.6, 0.8, 1"`
+
+---
+
+**Q: 比例值 0.5 和 1 有什么区别？**
+
+A: 
+- `0.5` = 50% 位置 = 帧 40（length=81 时）
+- `1` 或 `1.0` = 100% 位置 = 帧 80（length=81 时）
+
+---
+
+**Q: 可以让某些帧更密集吗？**
+
+A: 可以，使用自定义位置：`"0, 10, 15, 20, 50, 80"`
+
+---
+
+**Q: 位置会自动排序吗？**
+
+A: 不会，请按顺序输入位置值
+
+---
+
+## 📝 更新日志
+
+### 2025-10-31 重大更新
+
+- ✅ **解决中间帧闪烁问题**
+- ✅ 节点做了较大改变，请使用更新的示例工作流
+- ✅ 建议参数：
+  - 高噪中间帧强度：0.6-0.8
+  - 低噪中间帧强度：0.2 左右
+  - 复杂场景，低噪中间帧可直接设置为 0
+
+---
+
+## 📚 示例工作流
+
+项目提供了多个示例工作流供参考：
+
+- `Long video + segmented prompt words.json` - 长视频 + 分段提示词
+- `Wan22FMLF-1109update.json` - 最新更新版本
+- `长视频-SVI-shot+三图（Long Video Service with Unlimited 3-Image Continuation）.json` - 长视频服务（无限 3 图续接）
+
+---
+
+## 🤝 贡献
+
+欢迎提交 Issue 和 Pull Request！
+
+---
+
+## 📄 许可证
+
+查看项目许可证文件以获取更多信息。
+
+---
+
+**🎉 Don't worry, be happy!**
