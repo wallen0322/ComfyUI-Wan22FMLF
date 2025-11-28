@@ -1,25 +1,33 @@
 import { app } from "../../scripts/app.js";
 
 const MAX_IMAGES = 50;
-const THUMB_SIZE = 96;
+const RENDER_BATCH_SIZE = 6;
 const INIT_DELAY = 200;
-const RENDER_BATCH_SIZE = 4;
 const RENDER_DELAY = 30;
+
+function buildImageUrl(item) {
+    const params = new URLSearchParams({
+        filename: item.name || "",
+        subfolder: item.subfolder || "",
+        type: item.type || "input",
+    });
+    return `/view?${params.toString()}`;
+}
 
 class WanMultiImageGallery {
     constructor(node, imagesDataWidget) {
         this.node = node;
         this.imagesDataWidget = imagesDataWidget;
 
-        /** @type {{name:string, data:string, thumb?:string}[]} */
+        /** @type {{name:string, type:string, subfolder:string}[]} */
         this.images = [];
         this.sortOrders = {};
-        this.thumbnailCache = new Map();
         this.thumbnailElements = new Map();
         this.currentIndex = 0;
-        this.renderScheduled = false;
+
         this.isInitializing = false;
         this.initCancelled = false;
+        this.renderScheduled = false;
 
         this.root = this._buildRootDOM();
         this._bindIndexWidget();
@@ -28,7 +36,6 @@ class WanMultiImageGallery {
 
     _buildRootDOM() {
         const container = document.createElement("div");
-        container.className = "wan-multi-image-loader";
         container.style.cssText = `
             width: 100%;
             padding: 6px;
@@ -160,6 +167,7 @@ class WanMultiImageGallery {
             if (!files.length) return;
             await this._processFiles(files, !isAddingMode);
             this.fileInput.value = "";
+            isAddingMode = false;
         };
     }
 
@@ -171,15 +179,12 @@ class WanMultiImageGallery {
 
         const originalCb = indexWidget.callback;
         const gallery = this;
-        
         indexWidget.callback = function(...args) {
             if (originalCb) {
                 originalCb.apply(this, args);
             }
-            if (gallery) {
-                gallery.currentIndex = this.value ?? 0;
-                gallery._updateHighlight();
-            }
+            gallery.currentIndex = this.value ?? 0;
+            gallery._updateHighlight();
         };
     }
 
@@ -206,7 +211,8 @@ class WanMultiImageGallery {
     _syncWidgetFromImages() {
         const slim = this.images.map((item) => ({
             name: item.name,
-            data: item.data,
+            type: item.type || "input",
+            subfolder: item.subfolder || "",
         }));
         this.imagesDataWidget.value = JSON.stringify(slim);
     }
@@ -224,37 +230,34 @@ class WanMultiImageGallery {
                 return;
             }
 
-            this.images = new Array(data.length);
+            this.images = data.map((d) => ({
+                name: d.name,
+                type: d.type || "input",
+                subfolder: d.subfolder || "",
+            }));
+
             this.previewContainer.innerHTML = "";
             this.thumbnailElements.clear();
             this._showProgress(true);
 
-            const total = data.length;
+            const total = this.images.length;
             for (let i = 0; i < total && !this.initCancelled; i += RENDER_BATCH_SIZE) {
-                const batch = data.slice(i, i + RENDER_BATCH_SIZE);
+                const batch = this.images.slice(i, i + RENDER_BATCH_SIZE);
                 const fragment = document.createDocumentFragment();
 
-                await Promise.all(
-                    batch.map(async (item, batchIdx) => {
-                        const idx = i + batchIdx;
-                        if (this.initCancelled) return;
-
-                        const thumb = await this._ensureThumbnail(item.data);
-                        this.images[idx] = {
-                            name: item.name || `image_${idx}`,
-                            data: item.data,
-                            thumb,
-                        };
-                        const dom = this._createThumbnail(idx, thumb);
-                        fragment.appendChild(dom);
-                    }),
-                );
+                batch.forEach((item, batchIdx) => {
+                    const idx = i + batchIdx;
+                    const url = buildImageUrl(item);
+                    const dom = this._createThumbnail(idx, url);
+                    fragment.appendChild(dom);
+                });
 
                 if (this.initCancelled) break;
-                this.previewContainer.appendChild(fragment);
-                this._setProgress((i + RENDER_BATCH_SIZE) / total);
 
-                if (i + RENDER_BATCH_SIZE < total) {
+                this.previewContainer.appendChild(fragment);
+                this._setProgress((i + batch.length) / total);
+
+                if (i + batch.length < total) {
                     await this._sleep(RENDER_DELAY);
                 }
             }
@@ -282,7 +285,6 @@ class WanMultiImageGallery {
             this.images = [];
             this.sortOrders = {};
             this.previewContainer.innerHTML = "";
-            this.thumbnailCache.clear();
             this.thumbnailElements.clear();
         }
 
@@ -294,7 +296,7 @@ class WanMultiImageGallery {
             const msg = `最多只能存 ${MAX_IMAGES} 张，当前已有 ${this.images.length} 张，继续将截断多余 ${excess} 张，是否继续？`;
             if (confirmDialog) {
                 confirmed = await confirmDialog({ title: "图片数量限制", message: msg });
-                        } else {
+            } else {
                 confirmed = window.confirm(msg);
             }
             if (!confirmed) return;
@@ -319,14 +321,19 @@ class WanMultiImageGallery {
                 batch.map(async (file, batchIdx) => {
                     const idx = startIndex + i + batchIdx;
                     try {
-                        const base64 = await this._readFileAsDataURL(file);
-                        if (!base64) {
-                            console.warn("WanMultiImageLoader: 读取文件失败", file);
+                        const meta = await this._uploadFileToServer(file);
+                        if (!meta) {
+                            console.warn("WanMultiImageLoader: 上传失败", file);
                             return null;
                         }
-                        const thumb = await this._ensureThumbnail(base64);
-                        this.images[idx] = { name: file.name, data: base64, thumb };
-                        return { idx, thumb };
+                        const item = {
+                            name: meta.name,
+                            type: meta.type || "input",
+                            subfolder: meta.subfolder || "",
+                        };
+                        this.images[idx] = item;
+                        const url = buildImageUrl(item);
+                        return { idx, url };
                     } catch (e) {
                         console.error("WanMultiImageLoader: 处理图片出错", file, e);
                         return null;
@@ -336,7 +343,7 @@ class WanMultiImageGallery {
 
             for (const r of results) {
                 if (!r) continue;
-                const dom = this._createThumbnail(r.idx, r.thumb);
+                const dom = this._createThumbnail(r.idx, r.url);
                 fragment.appendChild(dom);
             }
 
@@ -355,47 +362,25 @@ class WanMultiImageGallery {
         this.addBtn.disabled = false;
     }
 
-    _readFileAsDataURL(file) {
-        return new Promise((resolve, reject) => {
-            const reader = new FileReader();
-            reader.onload = (e) => resolve(e.target.result);
-            reader.onerror = (e) => reject(e);
-            reader.readAsDataURL(file);
-        });
-    }
+    async _uploadFileToServer(file) {
+        const formData = new FormData();
+        formData.append("image", file, file.name);
 
-    async _ensureThumbnail(base64) {
-        const key = base64;
-        if (this.thumbnailCache.has(key)) return this.thumbnailCache.get(key);
-
-        const img = new Image();
-        const thumb = await new Promise((resolve) => {
-            img.onload = () => {
-                const canvas = document.createElement("canvas");
-                canvas.width = THUMB_SIZE;
-                canvas.height = THUMB_SIZE;
-                const ctx = canvas.getContext("2d", { alpha: false });
-                ctx.fillStyle = "#000";
-                ctx.fillRect(0, 0, THUMB_SIZE, THUMB_SIZE);
-
-                const scale = Math.min(THUMB_SIZE / img.width, THUMB_SIZE / img.height);
-                const w = Math.floor(img.width * scale);
-                const h = Math.floor(img.height * scale);
-                const x = Math.floor((THUMB_SIZE - w) / 2);
-                const y = Math.floor((THUMB_SIZE - h) / 2);
-
-                ctx.drawImage(img, x, y, w, h);
-                resolve(canvas.toDataURL("image/jpeg", 0.3));
-            };
-            img.onerror = () => resolve(base64);
-            img.src = base64;
+        const res = await fetch("/upload/image", {
+            method: "POST",
+            body: formData,
         });
 
-        this.thumbnailCache.set(key, thumb);
-        return thumb;
+        if (!res.ok) {
+            console.error("WanMultiImageLoader: /upload/image 失败", res.status);
+            return null;
+        }
+
+        const json = await res.json();
+        return json;
     }
 
-    _createThumbnail(index, thumbData) {
+    _createThumbnail(index, imageUrl) {
         const wrapper = document.createElement("div");
         wrapper.style.cssText = `
             display: flex;
@@ -415,7 +400,7 @@ class WanMultiImageGallery {
         `;
 
         const img = document.createElement("img");
-        img.src = thumbData;
+        img.src = imageUrl;
         img.style.cssText = `
             width: 100%;
             height: 100%;
@@ -476,6 +461,7 @@ class WanMultiImageGallery {
         orderInput.placeholder = String(index);
         const sortOrderValue = this.sortOrders[index];
         orderInput.value = (sortOrderValue !== undefined && sortOrderValue !== null) ? String(sortOrderValue) : "";
+
         orderInput.style.cssText = `
             width: 100%;
             padding: 2px 3px;
@@ -487,8 +473,9 @@ class WanMultiImageGallery {
             box-sizing: border-box;
             text-align: center;
         `;
-                    orderInput.oninput = (e) => {
-                        const val = e.target.value.trim();
+
+        orderInput.oninput = (e) => {
+            const val = e.target.value.trim();
             if (val === "") {
                 delete this.sortOrders[index];
             } else {
@@ -517,18 +504,18 @@ class WanMultiImageGallery {
             const frag = document.createDocumentFragment();
 
             for (let i = 0; i < this.images.length; i++) {
-                const thumb = this.images[i].thumb || this.images[i].data;
-                const dom = this._createThumbnail(i, thumb);
+                const url = buildImageUrl(this.images[i]);
+                const dom = this._createThumbnail(i, url);
                 frag.appendChild(dom);
             }
 
             this.previewContainer.appendChild(frag);
-            
+
             const indexWidget = this.node.widgets?.find((w) => w.name === "index");
             if (indexWidget) {
                 this.currentIndex = indexWidget.value ?? 0;
             }
-            
+
             this._updateHighlight();
             this.renderScheduled = false;
         });
@@ -604,7 +591,6 @@ class WanMultiImageGallery {
         this.initCancelled = true;
         this.images = [];
         this.sortOrders = {};
-        this.thumbnailCache.clear();
         this.thumbnailElements.clear();
         this.previewContainer.innerHTML = "";
         this._syncWidgetFromImages();
@@ -635,7 +621,6 @@ class WanMultiImageGallery {
 
     destroy() {
         this.initCancelled = true;
-        this.thumbnailCache.clear();
         this.thumbnailElements.clear();
     }
 }
@@ -671,7 +656,6 @@ app.registerExtension({
                     multiline: false,
                 });
             }
-            // 前端使用，避免在 LiteGraph 节点属性列表里乱显示
             widget.hidden = true;
             widget.serialize = true;
 
