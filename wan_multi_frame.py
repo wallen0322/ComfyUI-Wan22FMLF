@@ -235,7 +235,22 @@ class WanMultiFrameRefToVideo(io.ComfyNode):
                         
                         mask_low_noise[:, :, frame_idx, :, :] = smooth_mask_value
 
-        concat_latent_image_low = concat_latent_image
+        image_low_only = torch.ones((length, height, width, 3), device=device) * 0.5
+
+        for i, pos in enumerate(aligned_positions):
+            frame_idx = int(pos)
+
+            if i == 0:
+                if start_frame_strength_low > 0.0:
+                    image_low_only[frame_idx:frame_idx + 1] = imgs[i]
+            elif i == n_imgs - 1:
+                if end_frame_strength_low > 0.0:
+                    image_low_only[-1:] = imgs[i]
+            else:
+                if ref_strength_low > 0.0:
+                    image_low_only[frame_idx:frame_idx + 1] = imgs[i]
+
+        concat_latent_image_low = vae.encode(image_low_only[:, :, :, :3])
 
         # Print low noise mask distribution for debugging
         if n_imgs >= 2:
