@@ -61,77 +61,13 @@ class WanFirstMiddleLastFrameToVideo(io.ComfyNode):
                 io.Image.Input("start_image", optional=True),
                 io.Image.Input("middle_image", optional=True),
                 io.Image.Input("end_image", optional=True),
-                io.Float.Input(
-                    "middle_frame_ratio",
-                    default=0.5,
-                    min=0.0,
-                    max=1.0,
-                    step=0.01,
-                    round=0.01,
-                    display_mode=io.NumberDisplay.slider,
-                    optional=True,
-                ),
-                io.Float.Input(
-                    "high_noise_mid_strength",
-                    default=0.8,
-                    min=0.0,
-                    max=1.0,
-                    step=0.05,
-                    round=0.01,
-                    display_mode=io.NumberDisplay.slider,
-                    optional=True,
-                ),
-                io.Float.Input(
-                    "low_noise_start_strength",
-                    default=1.0,
-                    min=0.0,
-                    max=1.0,
-                    step=0.05,
-                    round=0.01,
-                    display_mode=io.NumberDisplay.slider,
-                    optional=True,
-                ),
-                io.Float.Input(
-                    "low_noise_mid_strength",
-                    default=0.2,
-                    min=0.0,
-                    max=1.0,
-                    step=0.05,
-                    round=0.01,
-                    display_mode=io.NumberDisplay.slider,
-                    optional=True,
-                ),
-                io.Float.Input(
-                    "low_noise_end_strength",
-                    default=1.0,
-                    min=0.0,
-                    max=1.0,
-                    step=0.05,
-                    round=0.01,
-                    display_mode=io.NumberDisplay.slider,
-                    optional=True,
-                ),
-                io.Float.Input(
-                    "structural_repulsion_boost",
-                    default=1.0,
-                    min=1.0,
-                    max=2.0,
-                    step=0.05,
-                    round=0.01,
-                    display_mode=io.NumberDisplay.slider,
-                    optional=True,
-                ),
-                io.Float.Input(
-                    "color_interpolation_strength",
-                    default=0.3,
-                    min=0.0,
-                    max=1.0,
-                    step=0.05,
-                    round=0.01,
-                    display_mode=io.NumberDisplay.slider,
-                    optional=True,
-                    tooltip="颜色插值强度：在首帧和末帧之间对中间帧进行颜色线性插值，减少颜色突变。0.0=不使用插值，1.0=完全使用插值颜色。",
-                ),
+                io.Float.Input("mid_ratio", default=0.5, min=0.0, max=1.0, step=0.01, round=0.01, display_mode=io.NumberDisplay.slider, optional=True),
+                io.Float.Input("hi_noise_mid", default=0.8, min=0.0, max=1.0, step=0.05, round=0.01, display_mode=io.NumberDisplay.slider, optional=True),
+                io.Float.Input("lo_noise_start", default=1.0, min=0.0, max=1.0, step=0.05, round=0.01, display_mode=io.NumberDisplay.slider, optional=True),
+                io.Float.Input("lo_noise_mid", default=0.2, min=0.0, max=1.0, step=0.05, round=0.01, display_mode=io.NumberDisplay.slider, optional=True),
+                io.Float.Input("lo_noise_end", default=1.0, min=0.0, max=1.0, step=0.05, round=0.01, display_mode=io.NumberDisplay.slider, optional=True),
+                io.Float.Input("motion_boost", default=1.0, min=1.0, max=2.0, step=0.05, round=0.01, display_mode=io.NumberDisplay.slider, optional=True),
+                io.Float.Input("color_blend", default=0.3, min=0.0, max=1.0, step=0.05, round=0.01, display_mode=io.NumberDisplay.slider, optional=True, tooltip="颜色插值强度：在首帧和末帧之间对中间帧进行颜色线性插值，减少颜色突变。0.0=不使用插值，1.0=完全使用插值颜色。"),
                 io.ClipVisionOutput.Input("clip_vision_start_image", optional=True),
                 io.ClipVisionOutput.Input("clip_vision_middle_image", optional=True),
                 io.ClipVisionOutput.Input("clip_vision_end_image", optional=True),
@@ -158,13 +94,13 @@ class WanFirstMiddleLastFrameToVideo(io.ComfyNode):
         start_image=None,
         middle_image=None,
         end_image=None,
-        middle_frame_ratio=0.5,
-        high_noise_mid_strength=0.8,
-        low_noise_start_strength=1.0,
-        low_noise_mid_strength=0.2,
-        low_noise_end_strength=1.0,
-        structural_repulsion_boost=1.0,
-        color_interpolation_strength=0.3,
+        mid_ratio=0.5,
+        hi_noise_mid=0.8,
+        lo_noise_start=1.0,
+        lo_noise_mid=0.2,
+        lo_noise_end=1.0,
+        motion_boost=1.0,
+        color_blend=0.3,
         clip_vision_start_image=None,
         clip_vision_middle_image=None,
         clip_vision_end_image=None,
@@ -213,30 +149,19 @@ class WanFirstMiddleLastFrameToVideo(io.ComfyNode):
             device=device
         )
 
-        middle_idx = cls._calculate_aligned_position(middle_frame_ratio, length)
+        middle_idx = cls._calculate_aligned_position(mid_ratio, length)
         middle_idx = max(4, min(middle_idx, length - 5))
 
-        # 颜色线性插值处理：减少中间帧颜色突变
-        # 在首帧和末帧之间对中间帧进行颜色线性插值，确保平滑过渡
-        if color_interpolation_strength > 0.0 and middle_image is not None:
+        middle_image_for_conditioning = middle_image
+        if color_blend > 0.0 and middle_image is not None:
             if start_image is not None and end_image is not None:
-                # 计算中间位置的理论颜色（基于首帧和末帧的线性插值）
-                start_frame = start_image[0:1]  # 取首帧
-                end_frame = end_image[-1:]      # 取末帧
-                
-                # 计算中间帧在整个视频中的位置比例
+                start_frame = start_image[0:1]
+                end_frame = end_image[-1:]
                 middle_position_ratio = middle_idx / max(1.0, length - 1)
-                
-                # 线性插值：计算中间位置应该有的颜色
-                # 这样中间帧的颜色会平滑地落在首帧和末帧之间
                 theoretical_middle = start_frame * (1.0 - middle_position_ratio) + end_frame * middle_position_ratio
                 theoretical_middle = torch.clamp(theoretical_middle, 0.0, 1.0)
-                
-                # 混合实际中间帧和理论插值结果
-                # color_interpolation_strength = 0.0 时完全不使用插值（保持原始中间帧）
-                # color_interpolation_strength = 1.0 时完全使用插值（完全平滑）
-                middle_image = middle_image * (1.0 - color_interpolation_strength) + theoretical_middle * color_interpolation_strength
-                middle_image = torch.clamp(middle_image, 0.0, 1.0)
+                middle_image_for_conditioning = middle_image * (1.0 - color_blend) + theoretical_middle * color_blend
+                middle_image_for_conditioning = torch.clamp(middle_image_for_conditioning, 0.0, 1.0)
 
         mask_high_noise = mask_base.clone()
         mask_low_noise = mask_base.clone()
@@ -245,29 +170,29 @@ class WanFirstMiddleLastFrameToVideo(io.ComfyNode):
             image[:start_image.shape[0]] = start_image
             mask_high_noise[:, :, :start_image.shape[0] + 3] = 0.0
             
-            low_start_mask_value = 1.0 - low_noise_start_strength
+            low_start_mask_value = 1.0 - lo_noise_start
             mask_low_noise[:, :, :start_image.shape[0] + 3] = low_start_mask_value
 
         if middle_image is not None:
-            image[middle_idx:middle_idx + 1] = middle_image
+            image[middle_idx:middle_idx + 1] = middle_image_for_conditioning
 
             start_range = max(0, middle_idx)
             end_range = min(length, middle_idx + 4)
-            high_noise_mask_value = 1.0 - high_noise_mid_strength
+            high_noise_mask_value = 1.0 - hi_noise_mid
             mask_high_noise[:, :, start_range:end_range] = high_noise_mask_value
 
         if end_image is not None:
             image[-end_image.shape[0]:] = end_image
             mask_high_noise[:, :, -end_image.shape[0]:] = 0.0
             
-            low_end_mask_value = 1.0 - low_noise_end_strength
+            low_end_mask_value = 1.0 - lo_noise_end
             mask_low_noise[:, :, -end_image.shape[0]:] = low_end_mask_value
 
         concat_latent_image = vae.encode(image[:, :, :, :3])
 
-        if structural_repulsion_boost > 1.001 and length > 4:
+        if motion_boost > 1.001 and length > 4:
             mask_h, mask_w = mask_high_noise.shape[-2], mask_high_noise.shape[-1]
-            boost_factor = structural_repulsion_boost - 1.0
+            boost_factor = motion_boost - 1.0
             
             def create_spatial_gradient(img1, img2):
                 if img1 is None or img2 is None:
@@ -371,13 +296,13 @@ class WanFirstMiddleLastFrameToVideo(io.ComfyNode):
 
             image_low_only = torch.ones((length, height, width, 3), device=device) * 0.5
 
-            if start_image is not None and low_noise_start_strength > 0.0:
+            if start_image is not None and lo_noise_start > 0.0:
                 image_low_only[:start_image.shape[0]] = start_image
             
-            if middle_image is not None and low_noise_mid_strength > 0.0:
-                image_low_only[middle_idx:middle_idx + 1] = middle_image
+            if middle_image is not None and lo_noise_mid > 0.0:
+                image_low_only[middle_idx:middle_idx + 1] = middle_image_for_conditioning
             
-            if end_image is not None and low_noise_end_strength > 0.0:
+            if end_image is not None and lo_noise_end > 0.0:
                 image_low_only[-end_image.shape[0]:] = end_image
 
             concat_latent_image_low = vae.encode(image_low_only[:, :, :, :3])
