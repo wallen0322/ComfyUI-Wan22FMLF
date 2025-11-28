@@ -122,15 +122,15 @@ class WanFirstMiddleLastFrameToVideo(io.ComfyNode):
                     optional=True,
                 ),
                 io.Float.Input(
-                    "high_noise_mid_image_strength",
-                    default=0.75,
-                    min=0.5,
+                    "color_interpolation_strength",
+                    default=0.3,
+                    min=0.0,
                     max=1.0,
                     step=0.05,
                     round=0.01,
                     display_mode=io.NumberDisplay.slider,
                     optional=True,
-                    tooltip="高噪阶段中间帧参考图像强度衰减，降低此值可减少中间帧闪烁和突变。值越小，参考图像影响越弱。",
+                    tooltip="颜色插值强度：在首帧和末帧之间对中间帧进行颜色线性插值，减少颜色突变。0.0=不使用插值，1.0=完全使用插值颜色。",
                 ),
                 io.ClipVisionOutput.Input("clip_vision_start_image", optional=True),
                 io.ClipVisionOutput.Input("clip_vision_middle_image", optional=True),
@@ -164,7 +164,7 @@ class WanFirstMiddleLastFrameToVideo(io.ComfyNode):
         low_noise_mid_strength=0.2,
         low_noise_end_strength=1.0,
         structural_repulsion_boost=1.0,
-        high_noise_mid_image_strength=0.75,
+        color_interpolation_strength=0.3,
         clip_vision_start_image=None,
         clip_vision_middle_image=None,
         clip_vision_end_image=None,
@@ -216,6 +216,28 @@ class WanFirstMiddleLastFrameToVideo(io.ComfyNode):
         middle_idx = cls._calculate_aligned_position(middle_frame_ratio, length)
         middle_idx = max(4, min(middle_idx, length - 5))
 
+        # 颜色线性插值处理：减少中间帧颜色突变
+        # 在首帧和末帧之间对中间帧进行颜色线性插值，确保平滑过渡
+        if color_interpolation_strength > 0.0 and middle_image is not None:
+            if start_image is not None and end_image is not None:
+                # 计算中间位置的理论颜色（基于首帧和末帧的线性插值）
+                start_frame = start_image[0:1]  # 取首帧
+                end_frame = end_image[-1:]      # 取末帧
+                
+                # 计算中间帧在整个视频中的位置比例
+                middle_position_ratio = middle_idx / max(1.0, length - 1)
+                
+                # 线性插值：计算中间位置应该有的颜色
+                # 这样中间帧的颜色会平滑地落在首帧和末帧之间
+                theoretical_middle = start_frame * (1.0 - middle_position_ratio) + end_frame * middle_position_ratio
+                theoretical_middle = torch.clamp(theoretical_middle, 0.0, 1.0)
+                
+                # 混合实际中间帧和理论插值结果
+                # color_interpolation_strength = 0.0 时完全不使用插值（保持原始中间帧）
+                # color_interpolation_strength = 1.0 时完全使用插值（完全平滑）
+                middle_image = middle_image * (1.0 - color_interpolation_strength) + theoretical_middle * color_interpolation_strength
+                middle_image = torch.clamp(middle_image, 0.0, 1.0)
+
         mask_high_noise = mask_base.clone()
         mask_low_noise = mask_base.clone()
 
@@ -227,16 +249,8 @@ class WanFirstMiddleLastFrameToVideo(io.ComfyNode):
             mask_low_noise[:, :, :start_image.shape[0] + 3] = low_start_mask_value
 
         if middle_image is not None:
-            # 高噪阶段：为中间帧参考图像应用强度衰减
-            # 强度衰减：混合参考图像和中性图像，降低整体强度
-            # 这样可以让参考图像在采样早期影响较小，随着采样进行影响相对增强，减少闪烁
-            mid_image_blended = middle_image.clone()
-            blend_factor = high_noise_mid_image_strength
-            mid_image_blended = mid_image_blended * blend_factor + 0.5 * (1.0 - blend_factor)
-            
-            # 中间帧参考图像只设置在1帧位置
-            image[middle_idx:middle_idx + 1] = mid_image_blended
-            
+            image[middle_idx:middle_idx + 1] = middle_image
+
             start_range = max(0, middle_idx)
             end_range = min(length, middle_idx + 4)
             high_noise_mask_value = 1.0 - high_noise_mid_strength
@@ -250,7 +264,7 @@ class WanFirstMiddleLastFrameToVideo(io.ComfyNode):
             mask_low_noise[:, :, -end_image.shape[0]:] = low_end_mask_value
 
         concat_latent_image = vae.encode(image[:, :, :, :3])
-        
+
         if structural_repulsion_boost > 1.001 and length > 4:
             mask_h, mask_w = mask_high_noise.shape[-2], mask_high_noise.shape[-1]
             boost_factor = structural_repulsion_boost - 1.0
@@ -355,24 +369,18 @@ class WanFirstMiddleLastFrameToVideo(io.ComfyNode):
                             
                             mask_high_noise[:, :, frame_idx, :, :] = current_mask * adjusted_gradient
 
-        image_low_only = torch.ones((length, height, width, 3), device=device) * 0.5
+            image_low_only = torch.ones((length, height, width, 3), device=device) * 0.5
 
-        if start_image is not None and low_noise_start_strength > 0.0:
-            image_low_only[:start_image.shape[0]] = start_image
-        
-        if middle_image is not None and low_noise_mid_strength > 0.0:
-            # 低噪阶段：为中间帧参考图像应用轻微强度衰减
-            # 低噪阶段的强度衰减相对较小，因为低噪阶段需要更精确的控制
-            mid_image_low_blended = middle_image.clone()
-            low_blend_factor = 0.9  # 低噪阶段保持较高强度，只做轻微衰减以减少突变
-            mid_image_low_blended = mid_image_low_blended * low_blend_factor + 0.5 * (1.0 - low_blend_factor)
+            if start_image is not None and low_noise_start_strength > 0.0:
+                image_low_only[:start_image.shape[0]] = start_image
             
-            image_low_only[middle_idx:middle_idx + 1] = mid_image_low_blended
-        
-        if end_image is not None and low_noise_end_strength > 0.0:
-            image_low_only[-end_image.shape[0]:] = end_image
+            if middle_image is not None and low_noise_mid_strength > 0.0:
+                image_low_only[middle_idx:middle_idx + 1] = middle_image
+            
+            if end_image is not None and low_noise_end_strength > 0.0:
+                image_low_only[-end_image.shape[0]:] = end_image
 
-        concat_latent_image_low = vae.encode(image_low_only[:, :, :, :3])
+            concat_latent_image_low = vae.encode(image_low_only[:, :, :, :3])
 
         mask_high_reshaped = mask_high_noise.view(
             1,

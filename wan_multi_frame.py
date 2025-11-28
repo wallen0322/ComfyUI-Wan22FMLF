@@ -42,7 +42,6 @@ class WanMultiFrameRefToVideo(io.ComfyNode):
                 io.Float.Input("structural_repulsion_boost", default=1.0, min=1.0, max=2.0, step=0.05, round=0.01, display_mode=io.NumberDisplay.slider, optional=True, display_name="structural_repulsion_boost"),
                 io.Int.Input("protect_zone_size", default=6, min=0, max=20, step=1, display_mode=io.NumberDisplay.slider, optional=True, display_name="protect_zone_size"),
                 io.Float.Input("time_smoothing_factor", default=0.2, min=0.0, max=1.0, step=0.05, round=0.01, display_mode=io.NumberDisplay.slider, optional=True, display_name="time_smoothing_factor"),
-                io.Float.Input("ref_image_strength_high", default=0.75, min=0.5, max=1.0, step=0.05, round=0.01, display_mode=io.NumberDisplay.slider, optional=True, display_name="ref_image_strength_high", tooltip="高噪阶段中间参考帧图像强度衰减，降低此值可减少闪烁和突变。值越小，参考图像影响越弱。"),
                 io.ClipVisionOutput.Input("clip_vision_output", optional=True),
             ],
             outputs=[
@@ -57,8 +56,7 @@ class WanMultiFrameRefToVideo(io.ComfyNode):
     def execute(cls, positive, negative, vae, width, height, length, batch_size, ref_images,
                 mode="NORMAL", ref_positions="", ref_strength_high=0.8, end_frame_strength_high=1.0,
                 ref_strength_low=0.2, start_frame_strength_low=1.0, end_frame_strength_low=1.0,
-                structural_repulsion_boost=1.0, protect_zone_size=6, time_smoothing_factor=0.2, 
-                ref_image_strength_high=0.75, clip_vision_output=None):
+                structural_repulsion_boost=1.0, protect_zone_size=6, time_smoothing_factor=0.2, clip_vision_output=None):
         
         spacial_scale = vae.spacial_compression_encode()
         latent_channels = vae.latent_channels
@@ -108,14 +106,8 @@ class WanMultiFrameRefToVideo(io.ComfyNode):
                 mask_low_value = 1.0 - end_frame_strength_low
                 mask_low_noise[:, :, -4:] = mask_low_value
             else:
-                # 高噪阶段：为中间参考帧应用强度衰减
-                # 强度衰减：混合参考图像和中性图像，降低整体强度
-                ref_img_blended = imgs[i:i+1].clone()
-                blend_factor = ref_image_strength_high
-                ref_img_blended = ref_img_blended * blend_factor + 0.5 * (1.0 - blend_factor)
-                
-                image[frame_idx:frame_idx + 1] = ref_img_blended
-                
+                image[frame_idx:frame_idx + 1] = imgs[i]
+
                 mask_high_value = 1.0 - ref_strength_high
                 mask_high_noise[:, :, frame_idx:frame_idx + 4] = mask_high_value
 
@@ -178,7 +170,7 @@ class WanMultiFrameRefToVideo(io.ComfyNode):
                                 
                                 mask_high_noise[:, :, frame_idx, :, :] = current_mask * adjusted_gradient
 
-        image_low_only = torch.ones((length, height, width, 3), device=device) * 0.5
+                image_low_only = torch.ones((length, height, width, 3), device=device) * 0.5
 
         for i, pos in enumerate(aligned_positions):
             frame_idx = int(pos)
@@ -191,13 +183,9 @@ class WanMultiFrameRefToVideo(io.ComfyNode):
                     image_low_only[-1:] = imgs[i]
             else:
                 if ref_strength_low > 0.0:
-                    # 低噪阶段：为中间参考帧应用轻微强度衰减
-                    ref_img_low_blended = imgs[i:i+1].clone()
-                    low_blend_factor = 0.9  # 低噪阶段保持较高强度，只做轻微衰减以减少突变
-                    ref_img_low_blended = ref_img_low_blended * low_blend_factor + 0.5 * (1.0 - low_blend_factor)
-                    image_low_only[frame_idx:frame_idx + 1] = ref_img_low_blended
+                    image_low_only[frame_idx:frame_idx + 1] = imgs[i]
 
-        concat_latent_image_low = vae.encode(image_low_only[:, :, :, :3])
+                concat_latent_image_low = vae.encode(image_low_only[:, :, :, :3])
 
         # Print low noise mask distribution for debugging
         if n_imgs >= 2:
@@ -233,7 +221,7 @@ class WanMultiFrameRefToVideo(io.ComfyNode):
                 
                 if pos2 - 1 >= 0:
                     mask_after = mask_low_noise[:, :, pos2 - 1, :, :].mean().item()
-                else:
+            else:
                     mask_after = mask_low_noise[:, :, 0, :, :].mean().item()
                 
                 mask_at_ref = mask_low_noise[:, :, pos2, :, :].mean().item()
