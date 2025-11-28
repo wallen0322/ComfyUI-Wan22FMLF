@@ -11,8 +11,8 @@ import comfy.utils
 
 class WanMultiFrameRefToVideo(io.ComfyNode):
     
-    RETURN_TYPES = ("CONDITIONING", "CONDITIONING", "CONDITIONING", "LATENT")
-    RETURN_NAMES = ("positive_high", "positive_low", "negative", "latent")
+    RETURN_TYPES = ("CONDITIONING", "CONDITIONING", "CONDITIONING", "CONDITIONING", "LATENT")
+    RETURN_NAMES = ("positive_high", "positive_low", "negative_high", "negative_low", "latent")
     CATEGORY = "ComfyUI-Wan22FMLF"
     FUNCTION = "execute"
     OUTPUT_NODE = False
@@ -46,7 +46,8 @@ class WanMultiFrameRefToVideo(io.ComfyNode):
             outputs=[
                 io.Conditioning.Output(display_name="positive_high"),
                 io.Conditioning.Output(display_name="positive_low"),
-                io.Conditioning.Output(display_name="negative"),
+                io.Conditioning.Output(display_name="negative_high"),
+                io.Conditioning.Output(display_name="negative_low"),
                 io.Latent.Output(display_name="latent"),
             ],
         )
@@ -232,19 +233,27 @@ class WanMultiFrameRefToVideo(io.ComfyNode):
         })
         
         
-        negative_out = node_helpers.conditioning_set_values(negative, {
+        negative_high_noise = node_helpers.conditioning_set_values(negative, {
             "concat_latent_image": concat_latent_image_high,
             "concat_mask": mask_high_reshaped
+        })
+        
+        negative_low_noise = node_helpers.conditioning_set_values(negative, {
+            "concat_latent_image": concat_latent_image_low,
+            "concat_mask": mask_low_reshaped
         })
         
         if clip_vision_output is not None:
             positive_low_noise = node_helpers.conditioning_set_values(positive_low_noise,
                                                                    {"clip_vision_output": clip_vision_output})
             
-            negative_out = node_helpers.conditioning_set_values(negative_out, 
+            negative_high_noise = node_helpers.conditioning_set_values(negative_high_noise, 
+                                                             {"clip_vision_output": clip_vision_output})
+            
+            negative_low_noise = node_helpers.conditioning_set_values(negative_low_noise, 
                                                              {"clip_vision_output": clip_vision_output})
         
-        return io.NodeOutput(positive_high_noise, positive_low_noise, negative_out, {"samples": latent})
+        return io.NodeOutput(positive_high_noise, positive_low_noise, negative_high_noise, negative_low_noise, {"samples": latent})
 
     @classmethod
     def _resize_images(cls, images, width, height, device):
