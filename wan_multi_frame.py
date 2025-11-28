@@ -110,6 +110,8 @@ class WanMultiFrameRefToVideo(io.ComfyNode):
                 mask_low_value = 1.0 - ref_strength_low
                 mask_low_noise[:, :, start_range:end_range] = mask_low_value
 
+        concat_latent_image = vae.encode(image[:, :, :, :3])
+        
         if length > 4 and n_imgs >= 2:
             protect_zone_size = 6
             
@@ -119,39 +121,41 @@ class WanMultiFrameRefToVideo(io.ComfyNode):
                 
                 if pos2 > pos1 + 4:
                     start_end = pos1 + 4
-                    mid_protect_start = max(start_end, pos2 - protect_zone_size)
-                    ref_idx = pos2
+                    ref_protect_start = max(start_end, pos2 - protect_zone_size)
+                    ref_frame_start = pos2
+                    ref_frame_end = min(pos2 + 4, length)
                     
-                    if mid_protect_start > start_end:
-                        transition_length = mid_protect_start - start_end
+                    if ref_protect_start > start_end:
+                        transition_length = ref_protect_start - start_end
                         
-                        for frame_idx in range(start_end, mid_protect_start):
-                            current_mask = mask_low_noise[:, :, frame_idx, :, :]
-                            
-                            distance_to_start = (frame_idx - start_end) / max(1.0, transition_length)
-                            distance_to_ref = abs(frame_idx - ref_idx) / max(1.0, protect_zone_size)
-                            
-                            time_weight = 1.0 - distance_to_start * 0.2
-                            protect_weight = max(0.5, 1.0 - distance_to_ref)
-                            
-                            smooth_factor = time_weight * protect_weight
-                            
-                            if i == 0:
-                                base_mask_value = 0.0
-                            else:
-                                base_mask_value = 1.0 - ref_strength_low
-                            
-                            if i + 1 == n_imgs - 1:
-                                target_mask_value = 1.0 - end_frame_strength_low
-                            else:
-                                target_mask_value = 1.0 - ref_strength_low
-                            
-                            smooth_mask_value = base_mask_value + (target_mask_value - base_mask_value) * (1.0 - smooth_factor)
-                            
-                            mask_low_noise[:, :, frame_idx, :, :] = smooth_mask_value
+                        for frame_idx in range(start_end, ref_protect_start):
+                            if frame_idx < ref_frame_start:
+                                current_mask = mask_low_noise[:, :, frame_idx, :, :]
+                                
+                                distance_to_start = (frame_idx - start_end) / max(1.0, transition_length)
+                                distance_to_ref = abs(frame_idx - ref_frame_start) / max(1.0, protect_zone_size)
+                                
+                                time_weight = 1.0 - distance_to_start * 0.2
+                                protect_weight = max(0.5, 1.0 - distance_to_ref)
+                                
+                                smooth_factor = time_weight * protect_weight
+                                
+                                if i == 0:
+                                    base_mask_value = 0.0
+                                else:
+                                    base_mask_value = 1.0 - ref_strength_low
+                                
+                                if i + 1 == n_imgs - 1:
+                                    target_mask_value = 1.0 - end_frame_strength_low
+                                else:
+                                    target_mask_value = 1.0 - ref_strength_low
+                                
+                                smooth_mask_value = base_mask_value + (target_mask_value - base_mask_value) * (1.0 - smooth_factor)
+                                
+                                mask_low_noise[:, :, frame_idx, :, :] = smooth_mask_value
 
         if mode == "SINGLE_PERSON":
-            concat_latent_image_high = vae.encode(image[:, :, :, :3])
+            concat_latent_image_high = concat_latent_image
         else:
             need_selective_image_high = (ref_strength_high == 0.0) or (end_frame_strength_high == 0.0)
 
@@ -172,7 +176,7 @@ class WanMultiFrameRefToVideo(io.ComfyNode):
 
                 concat_latent_image_high = vae.encode(image_high_only[:, :, :, :3])
             else:
-                concat_latent_image_high = vae.encode(image[:, :, :, :3])
+                concat_latent_image_high = concat_latent_image
 
         if structural_repulsion_boost > 1.001 and length > 4 and n_imgs >= 2:
             mask_h, mask_w = mask_high_noise.shape[-2], mask_high_noise.shape[-1]
@@ -205,7 +209,7 @@ class WanMultiFrameRefToVideo(io.ComfyNode):
                     start_end = pos1 + 4
                     protect_zone_size = 6
                     ref_protect_start = max(start_end, pos2 - protect_zone_size)
-                    ref_protect_center = pos2
+                    ref_frame_start = pos2
                     transition_end = min(ref_protect_start, length)
                     
                     img1 = imgs[i:i+1].to(device)
@@ -217,18 +221,19 @@ class WanMultiFrameRefToVideo(io.ComfyNode):
                         transition_length = transition_end - start_end
                         
                         for frame_idx in range(start_end, transition_end):
-                            current_mask = mask_high_noise[:, :, frame_idx, :, :]
-                            
-                            distance_to_start = (frame_idx - start_end) / max(1.0, transition_length)
-                            distance_to_ref = abs(frame_idx - ref_protect_center) / max(1.0, protect_zone_size)
-                            
-                            time_weight = 1.0 - distance_to_start * 0.3
-                            protect_weight = max(0.3, 1.0 - distance_to_ref) if frame_idx < ref_protect_center else 1.0
-                            
-                            combined_weight = time_weight * protect_weight
-                            adjusted_gradient = 1.0 - (1.0 - spatial_gradient) * combined_weight
-                            
-                            mask_high_noise[:, :, frame_idx, :, :] = current_mask * adjusted_gradient
+                            if frame_idx < ref_frame_start:
+                                current_mask = mask_high_noise[:, :, frame_idx, :, :]
+                                
+                                distance_to_start = (frame_idx - start_end) / max(1.0, transition_length)
+                                distance_to_ref = abs(frame_idx - ref_frame_start) / max(1.0, protect_zone_size)
+                                
+                                time_weight = 1.0 - distance_to_start * 0.3
+                                protect_weight = max(0.3, 1.0 - distance_to_ref)
+                                
+                                combined_weight = time_weight * protect_weight
+                                adjusted_gradient = 1.0 - (1.0 - spatial_gradient) * combined_weight
+                                
+                                mask_high_noise[:, :, frame_idx, :, :] = current_mask * adjusted_gradient
 
         if mode == "SINGLE_PERSON":
             mask_low_noise = mask_base.clone()
@@ -269,7 +274,7 @@ class WanMultiFrameRefToVideo(io.ComfyNode):
 
                 concat_latent_image_low = vae.encode(image_low_only[:, :, :, :3])
             else:
-                concat_latent_image_low = vae.encode(image[:, :, :, :3])
+                concat_latent_image_low = concat_latent_image
 
         mask_high_reshaped = mask_high_noise.view(1, mask_high_noise.shape[2] // 4, 4, mask_high_noise.shape[3], mask_high_noise.shape[4]).transpose(1, 2)
         mask_low_reshaped = mask_low_noise.view(1, mask_low_noise.shape[2] // 4, 4, mask_low_noise.shape[3], mask_low_noise.shape[4]).transpose(1, 2)
