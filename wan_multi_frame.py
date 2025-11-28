@@ -107,6 +107,9 @@ class WanMultiFrameRefToVideo(io.ComfyNode):
                 mask_low_noise[:, :, -4:] = mask_low_value
             else:
                 image[frame_idx:frame_idx + 1] = imgs[i]
+                
+                mask_high_value = 1.0 - ref_strength_high
+                mask_high_noise[:, :, frame_idx:frame_idx + 4] = mask_high_value
 
         concat_latent_image = vae.encode(image[:, :, :, :3])
 

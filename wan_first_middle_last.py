@@ -216,6 +216,11 @@ class WanFirstMiddleLastFrameToVideo(io.ComfyNode):
 
         if middle_image is not None:
             image[middle_idx:middle_idx + 1] = middle_image
+            
+            start_range = max(0, middle_idx)
+            end_range = min(length, middle_idx + 4)
+            high_noise_mask_value = 1.0 - high_noise_mid_strength
+            mask_high_noise[:, :, start_range:end_range] = high_noise_mask_value
 
         if end_image is not None:
             image[-end_image.shape[0]:] = end_image
