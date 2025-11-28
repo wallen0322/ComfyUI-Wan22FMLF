@@ -107,14 +107,12 @@ class WanMultiFrameRefToVideo(io.ComfyNode):
                 mask_low_noise[:, :, -4:] = mask_low_value
             else:
                 image[frame_idx:frame_idx + 1] = imgs[i]
-                start_range = max(0, frame_idx)
-                end_range = min(length, frame_idx + 4)
-
+                
                 mask_high_value = 1.0 - ref_strength_high
-                mask_high_noise[:, :, start_range:end_range] = mask_high_value
+                mask_high_noise[:, :, frame_idx:frame_idx + 1] = mask_high_value
 
                 mask_low_value = 1.0 - ref_strength_low
-                mask_low_noise[:, :, start_range:end_range] = mask_low_value
+                mask_low_noise[:, :, frame_idx:frame_idx + 1] = mask_low_value
 
         concat_latent_image = vae.encode(image[:, :, :, :3])
 
@@ -149,9 +147,8 @@ class WanMultiFrameRefToVideo(io.ComfyNode):
                 
                 if pos2 > pos1 + 4:
                     start_end = pos1 + 4
-                    ref_protect_start = max(start_end, pos2 - protect_zone_size)
                     ref_frame_start = pos2
-                    transition_end = min(ref_protect_start, length)
+                    transition_end = pos2
                     
                     img1 = imgs[i:i+1].to(device)
                     img2 = imgs[i+1:i+2].to(device)
@@ -168,8 +165,8 @@ class WanMultiFrameRefToVideo(io.ComfyNode):
                                 distance_to_start = (frame_idx - start_end) / max(1.0, transition_length)
                                 distance_to_ref = abs(frame_idx - ref_frame_start) / max(1.0, protect_zone_size)
                                 
-                                time_weight = 1.0 - distance_to_start * time_smoothing_factor * 1.5
-                                protect_weight = max(0.3, 1.0 - distance_to_ref)
+                                time_weight = 1.0 - distance_to_start * time_smoothing_factor
+                                protect_weight = max(0.3, 1.0 - distance_to_ref) if frame_idx < ref_frame_start else 1.0
                                 
                                 combined_weight = time_weight * protect_weight
                                 adjusted_gradient = 1.0 - (1.0 - spatial_gradient) * combined_weight
@@ -183,17 +180,17 @@ class WanMultiFrameRefToVideo(io.ComfyNode):
                 
                 if pos2 > pos1 + 4:
                     start_end = pos1 + 4
-                    ref_protect_start = max(start_end, pos2 - protect_zone_size)
+                    transition_end = pos2
                     
-                    if ref_protect_start > start_end:
-                        transition_length = ref_protect_start - start_end
+                    if transition_end > start_end:
+                        transition_length = transition_end - start_end
                         
-                        for frame_idx in range(start_end, ref_protect_start):
+                        for frame_idx in range(start_end, transition_end):
                             distance_to_start = (frame_idx - start_end) / max(1.0, transition_length)
                             distance_to_ref = abs(frame_idx - pos2) / max(1.0, protect_zone_size)
                             
                             time_weight = 1.0 - distance_to_start * time_smoothing_factor
-                            protect_weight = max(0.5, 1.0 - distance_to_ref)
+                            protect_weight = max(0.5, 1.0 - distance_to_ref) if distance_to_ref > 0 else 1.0
                             
                             smooth_factor = time_weight * protect_weight
                             
