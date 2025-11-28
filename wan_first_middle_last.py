@@ -217,13 +217,6 @@ class WanFirstMiddleLastFrameToVideo(io.ComfyNode):
         if middle_image is not None:
             image[middle_idx:middle_idx + 1] = middle_image
 
-            start_range = max(0, middle_idx)
-            end_range = min(length, middle_idx + 4)
-
-            high_noise_mask_value = 1.0 - high_noise_mid_strength
-            mask_high_noise[:, :, start_range:end_range] = high_noise_mask_value
-
-
         if end_image is not None:
             image[-end_image.shape[0]:] = end_image
             mask_high_noise[:, :, -end_image.shape[0]:] = 0.0
@@ -232,6 +225,54 @@ class WanFirstMiddleLastFrameToVideo(io.ComfyNode):
             mask_low_noise[:, :, -end_image.shape[0]:] = low_end_mask_value
 
         concat_latent_image = vae.encode(image[:, :, :, :3])
+        
+        if length > 4 and middle_image is not None:
+            protect_zone_size = 6
+            
+            if start_image is not None and middle_image is not None:
+                start_end = start_image.shape[0] + 3
+                
+                if middle_idx >= start_end:
+                    transition_length = middle_idx - start_end + 1
+                    time_smoothing_factor = 0.2
+                    
+                    for frame_idx in range(start_end, middle_idx + 1):
+                        distance_to_start = (frame_idx - start_end) / max(1.0, transition_length - 1) if transition_length > 1 else 0.0
+                        distance_to_mid = abs(frame_idx - middle_idx) / max(1.0, protect_zone_size)
+                        
+                        time_weight = 1.0 - distance_to_start * time_smoothing_factor
+                        protect_weight = max(0.5, 1.0 - distance_to_mid) if distance_to_mid > 0 else 1.0
+                        
+                        smooth_factor = time_weight * protect_weight
+                        
+                        base_mask_value = 0.0
+                        target_mask_value = 1.0 - high_noise_mid_strength
+                        smooth_mask_value = base_mask_value + (target_mask_value - base_mask_value) * (1.0 - smooth_factor)
+                        
+                        mask_high_noise[:, :, frame_idx, :, :] = smooth_mask_value
+            
+            if middle_image is not None and end_image is not None:
+                transition_start = middle_idx
+                end_start = length - end_image.shape[0]
+                
+                if end_start > transition_start:
+                    transition_length = end_start - transition_start
+                    time_smoothing_factor = 0.2
+                    
+                    for frame_idx in range(transition_start, end_start):
+                        distance_to_mid = abs(frame_idx - middle_idx) / max(1.0, protect_zone_size)
+                        distance_to_end = (end_start - frame_idx) / max(1.0, transition_length)
+                        
+                        protect_weight = max(0.5, 1.0 - distance_to_mid) if distance_to_mid > 0 else 1.0
+                        time_weight = 1.0 - distance_to_end * time_smoothing_factor
+                        
+                        smooth_factor = time_weight * protect_weight
+                        
+                        base_mask_value = 1.0 - high_noise_mid_strength
+                        target_mask_value = 0.0
+                        smooth_mask_value = base_mask_value + (target_mask_value - base_mask_value) * (1.0 - smooth_factor)
+                        
+                        mask_high_noise[:, :, frame_idx, :, :] = smooth_mask_value
         
         if length > 4 and middle_image is not None and low_noise_mid_strength > 0.0:
             protect_zone_size = 6
