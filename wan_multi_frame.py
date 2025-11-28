@@ -92,13 +92,11 @@ class WanMultiFrameRefToVideo(io.ComfyNode):
             frame_idx = int(pos)
 
             if i == 0:
-                start_img_len = imgs[i].shape[0]
-                image[frame_idx:frame_idx + start_img_len] = imgs[i]
-                mask_range = min(frame_idx + start_img_len + 3, length)
-                mask_high_noise[:, :, frame_idx:mask_range] = 0.0
+                image[frame_idx:frame_idx + 1] = imgs[i]
+                mask_high_noise[:, :, frame_idx:frame_idx + 4] = 0.0
                 
                 low_start_mask_value = 1.0 - start_frame_strength_low
-                mask_low_noise[:, :, frame_idx:mask_range] = low_start_mask_value
+                mask_low_noise[:, :, frame_idx:frame_idx + 4] = low_start_mask_value
             elif i == n_imgs - 1:
                 image[-1:] = imgs[i]
 
@@ -165,8 +163,6 @@ class WanMultiFrameRefToVideo(io.ComfyNode):
                         
                         for frame_idx in range(start_end, transition_end):
                             if frame_idx < ref_frame_start:
-                                current_mask = mask_high_noise[:, :, frame_idx, :, :]
-                                
                                 distance_to_start = (frame_idx - start_end) / max(1.0, transition_length)
                                 distance_to_ref = abs(frame_idx - ref_frame_start) / max(1.0, protect_zone_size)
                                 
@@ -176,7 +172,7 @@ class WanMultiFrameRefToVideo(io.ComfyNode):
                                 combined_weight = time_weight * protect_weight
                                 adjusted_gradient = 1.0 - (1.0 - spatial_gradient) * combined_weight
                                 
-                                mask_high_noise[:, :, frame_idx, :, :] = current_mask * adjusted_gradient
+                                mask_high_noise[:, :, frame_idx, :, :] = adjusted_gradient
 
         concat_latent_image_low = concat_latent_image
 
