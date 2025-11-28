@@ -34,14 +34,14 @@ class WanMultiFrameRefToVideo(io.ComfyNode):
                 io.Image.Input("ref_images"),
                 io.Combo.Input("mode", ["NORMAL", "SINGLE_PERSON"], default="NORMAL", optional=True),
                 io.String.Input("ref_positions", default="", optional=True),
-                io.Float.Input("ref_strength_high", default=0.8, min=0.0, max=1.0, step=0.05, round=0.01, display_mode=io.NumberDisplay.slider, optional=True),
-                io.Float.Input("ref_strength_low", default=0.2, min=0.0, max=1.0, step=0.05, round=0.01, display_mode=io.NumberDisplay.slider, optional=True),
-                io.Float.Input("start_frame_strength_low", default=1.0, min=0.0, max=1.0, step=0.05, round=0.01, display_mode=io.NumberDisplay.slider, optional=True),
-                io.Float.Input("end_frame_strength_high", default=1.0, min=0.0, max=1.0, step=0.05, round=0.01, display_mode=io.NumberDisplay.slider, optional=True),
-                io.Float.Input("end_frame_strength_low", default=1.0, min=0.0, max=1.0, step=0.05, round=0.01, display_mode=io.NumberDisplay.slider, optional=True),
-                io.Float.Input("structural_repulsion_boost", default=1.0, min=1.0, max=2.0, step=0.05, round=0.01, display_mode=io.NumberDisplay.slider, optional=True),
-                io.Int.Input("protect_zone_size", default=6, min=0, max=20, step=1, display_mode=io.NumberDisplay.slider, optional=True),
-                io.Float.Input("time_smoothing_factor", default=0.2, min=0.0, max=1.0, step=0.05, round=0.01, display_mode=io.NumberDisplay.slider, optional=True),
+                io.Float.Input("ref_strength_high", default=0.8, min=0.0, max=1.0, step=0.05, round=0.01, display_mode=io.NumberDisplay.slider, optional=True, display_name="ref_strength_high"),
+                io.Float.Input("end_frame_strength_high", default=1.0, min=0.0, max=1.0, step=0.05, round=0.01, display_mode=io.NumberDisplay.slider, optional=True, display_name="end_frame_strength_high"),
+                io.Float.Input("ref_strength_low", default=0.2, min=0.0, max=1.0, step=0.05, round=0.01, display_mode=io.NumberDisplay.slider, optional=True, display_name="ref_strength_low"),
+                io.Float.Input("start_frame_strength_low", default=1.0, min=0.0, max=1.0, step=0.05, round=0.01, display_mode=io.NumberDisplay.slider, optional=True, display_name="start_frame_strength_low"),
+                io.Float.Input("end_frame_strength_low", default=1.0, min=0.0, max=1.0, step=0.05, round=0.01, display_mode=io.NumberDisplay.slider, optional=True, display_name="end_frame_strength_low"),
+                io.Float.Input("structural_repulsion_boost", default=1.0, min=1.0, max=2.0, step=0.05, round=0.01, display_mode=io.NumberDisplay.slider, optional=True, display_name="structural_repulsion_boost"),
+                io.Int.Input("protect_zone_size", default=6, min=0, max=20, step=1, display_mode=io.NumberDisplay.slider, optional=True, display_name="protect_zone_size"),
+                io.Float.Input("time_smoothing_factor", default=0.2, min=0.0, max=1.0, step=0.05, round=0.01, display_mode=io.NumberDisplay.slider, optional=True, display_name="time_smoothing_factor"),
                 io.ClipVisionOutput.Input("clip_vision_output", optional=True),
             ],
             outputs=[
@@ -54,8 +54,8 @@ class WanMultiFrameRefToVideo(io.ComfyNode):
 
     @classmethod
     def execute(cls, positive, negative, vae, width, height, length, batch_size, ref_images,
-                mode="NORMAL", ref_positions="", ref_strength_high=0.8, ref_strength_low=0.2,
-                start_frame_strength_low=1.0, end_frame_strength_high=1.0, end_frame_strength_low=1.0, 
+                mode="NORMAL", ref_positions="", ref_strength_high=0.8, end_frame_strength_high=1.0,
+                ref_strength_low=0.2, start_frame_strength_low=1.0, end_frame_strength_low=1.0,
                 structural_repulsion_boost=1.0, protect_zone_size=6, time_smoothing_factor=0.2, clip_vision_output=None):
         
         spacial_scale = vae.spacial_compression_encode()
@@ -163,6 +163,8 @@ class WanMultiFrameRefToVideo(io.ComfyNode):
                         
                         for frame_idx in range(start_end, transition_end):
                             if frame_idx < ref_frame_start:
+                                current_mask = mask_high_noise[:, :, frame_idx, :, :]
+                                
                                 distance_to_start = (frame_idx - start_end) / max(1.0, transition_length)
                                 distance_to_ref = abs(frame_idx - ref_frame_start) / max(1.0, protect_zone_size)
                                 
@@ -172,9 +174,94 @@ class WanMultiFrameRefToVideo(io.ComfyNode):
                                 combined_weight = time_weight * protect_weight
                                 adjusted_gradient = 1.0 - (1.0 - spatial_gradient) * combined_weight
                                 
-                                mask_high_noise[:, :, frame_idx, :, :] = adjusted_gradient
+                                mask_high_noise[:, :, frame_idx, :, :] = current_mask * adjusted_gradient
+
+        if length > 4 and n_imgs >= 2:
+            for i in range(n_imgs - 1):
+                pos1 = int(aligned_positions[i])
+                pos2 = int(aligned_positions[i + 1])
+                
+                if pos2 > pos1 + 4:
+                    start_end = pos1 + 4
+                    ref_protect_start = max(start_end, pos2 - protect_zone_size)
+                    ref_frame_start = pos2
+                    
+                    if ref_protect_start > start_end:
+                        transition_length = ref_protect_start - start_end
+                        
+                        for frame_idx in range(start_end, ref_protect_start):
+                            if frame_idx < ref_frame_start:
+                                distance_to_start = (frame_idx - start_end) / max(1.0, transition_length)
+                                distance_to_ref = abs(frame_idx - ref_frame_start) / max(1.0, protect_zone_size)
+                                
+                                time_weight = 1.0 - distance_to_start * time_smoothing_factor
+                                protect_weight = max(0.5, 1.0 - distance_to_ref)
+                                
+                                smooth_factor = time_weight * protect_weight
+                                
+                                if i == 0:
+                                    base_mask_value = 1.0 - start_frame_strength_low
+                                    smooth_start_offset = 4
+                                    if frame_idx < start_end + smooth_start_offset:
+                                        smooth_factor = smooth_factor * (frame_idx - start_end) / max(1.0, smooth_start_offset)
+                                else:
+                                    base_mask_value = 1.0 - ref_strength_low
+                                
+                                if i + 1 == n_imgs - 1:
+                                    target_mask_value = 1.0 - end_frame_strength_low
+                                else:
+                                    target_mask_value = 1.0 - ref_strength_low
+                                
+                                smooth_mask_value = base_mask_value + (target_mask_value - base_mask_value) * (1.0 - smooth_factor)
+                                
+                                mask_low_noise[:, :, frame_idx, :, :] = smooth_mask_value
 
         concat_latent_image_low = concat_latent_image
+
+        # Print low noise mask distribution for debugging
+        if n_imgs >= 2:
+            print("\n=== Low Noise Mask Distribution ===")
+            print(f"Total frames: {length}, Reference frames: {n_imgs}")
+            print(f"Parameters: start_strength_low={start_frame_strength_low}, ref_strength_low={ref_strength_low}, end_strength_low={end_frame_strength_low}")
+            print("\nMask values at reference frame positions:")
+            for i, pos in enumerate(aligned_positions):
+                frame_idx = int(pos)
+                mask_samples = []
+                sample_frames = [max(0, frame_idx - 2), frame_idx, min(length - 1, frame_idx + 2), min(length - 1, frame_idx + 4)]
+                for sf in sample_frames:
+                    if 0 <= sf < length:
+                        mask_val = mask_low_noise[:, :, sf, :, :].mean().item()
+                        mask_samples.append((sf, mask_val))
+                
+                frame_type = "首帧" if i == 0 else ("末帧" if i == n_imgs - 1 else f"参考帧{i+1}")
+                print(f"  {frame_type} (位置 {frame_idx}):")
+                for sf, mv in mask_samples:
+                    print(f"    Frame {sf}: mask = {mv:.3f}")
+            
+            # Check for abrupt mask changes
+            print("\n检查参考帧之间的mask变化:")
+            for i in range(n_imgs - 1):
+                pos1 = int(aligned_positions[i])
+                pos2 = int(aligned_positions[i + 1])
+                
+                # Check mask at boundaries
+                if pos1 + 4 < length:
+                    mask_before = mask_low_noise[:, :, pos1 + 4, :, :].mean().item()
+                else:
+                    mask_before = mask_low_noise[:, :, length - 1, :, :].mean().item()
+                
+                if pos2 - 1 >= 0:
+                    mask_after = mask_low_noise[:, :, pos2 - 1, :, :].mean().item()
+                else:
+                    mask_after = mask_low_noise[:, :, 0, :, :].mean().item()
+                
+                mask_at_ref = mask_low_noise[:, :, pos2, :, :].mean().item()
+                
+                change = abs(mask_after - mask_before)
+                print(f"  参考帧{i+1} -> 参考帧{i+2}: frame {pos1+4} mask={mask_before:.3f}, frame {pos2-1} mask={mask_after:.3f}, 参考帧位置 mask={mask_at_ref:.3f}, 变化={change:.3f}")
+                if change > 0.2:
+                    print(f"    ⚠️ 警告: mask变化较大 ({change:.3f})，可能导致闪烁！")
+            print("=" * 40 + "\n")
 
         mask_high_reshaped = mask_high_noise.view(1, mask_high_noise.shape[2] // 4, 4, mask_high_noise.shape[3], mask_high_noise.shape[4]).transpose(1, 2)
         mask_low_reshaped = mask_low_noise.view(1, mask_low_noise.shape[2] // 4, 4, mask_low_noise.shape[3], mask_low_noise.shape[4]).transpose(1, 2)
