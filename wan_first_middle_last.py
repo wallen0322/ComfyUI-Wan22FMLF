@@ -223,8 +223,9 @@ class WanFirstMiddleLastFrameToVideo(io.ComfyNode):
             high_noise_mask_value = 1.0 - high_noise_mid_strength
             mask_high_noise[:, :, start_range:end_range] = high_noise_mask_value
 
-            low_middle_mask_value = 1.0 - low_noise_mid_strength
-            mask_low_noise[:, :, start_range:end_range] = low_middle_mask_value
+            if low_noise_mid_strength > 0.0:
+                low_middle_mask_value = 1.0 - low_noise_mid_strength
+                mask_low_noise[:, :, start_range:end_range] = low_middle_mask_value
 
         if end_image is not None:
             image[-end_image.shape[0]:] = end_image
@@ -235,7 +236,7 @@ class WanFirstMiddleLastFrameToVideo(io.ComfyNode):
 
         concat_latent_image = vae.encode(image[:, :, :, :3])
         
-        if length > 4 and middle_image is not None:
+        if length > 4 and middle_image is not None and low_noise_mid_strength > 0.0:
             protect_zone_size = 6
             
             if start_image is not None and middle_image is not None:
@@ -390,27 +391,18 @@ class WanFirstMiddleLastFrameToVideo(io.ComfyNode):
                             
                             mask_high_noise[:, :, frame_idx, :, :] = current_mask * adjusted_gradient
 
-        if mode == "SINGLE_PERSON":
-            image_low_only = torch.ones((length, height, width, 3), device=device) * 0.5
-            if start_image is not None:
-                image_low_only[:start_image.shape[0]] = start_image
-            concat_latent_image_low = vae.encode(image_low_only[:, :, :, :3])
-        elif low_noise_start_strength == 0.0 or low_noise_mid_strength == 0.0 or low_noise_end_strength == 0.0:
-            image_low_only = torch.ones((length, height, width, 3), device=device) * 0.5
+        image_low_only = torch.ones((length, height, width, 3), device=device) * 0.5
 
-            if start_image is not None and low_noise_start_strength > 0.0:
-                image_low_only[:start_image.shape[0]] = start_image
-            
-            if middle_image is not None and low_noise_mid_strength > 0.0:
-                image_low_only[middle_idx:middle_idx + 1] = middle_image
-            
-            if end_image is not None and low_noise_end_strength > 0.0:
-                image_low_only[-end_image.shape[0]:] = end_image
+        if start_image is not None and low_noise_start_strength > 0.0:
+            image_low_only[:start_image.shape[0]] = start_image
+        
+        if middle_image is not None and low_noise_mid_strength > 0.0:
+            image_low_only[middle_idx:middle_idx + 1] = middle_image
+        
+        if end_image is not None and low_noise_end_strength > 0.0:
+            image_low_only[-end_image.shape[0]:] = end_image
 
-            concat_latent_image_low = vae.encode(image_low_only[:, :, :, :3])
-        else:
-            # 低噪阶段使用原始 latent（不受运动增强影响）
-            concat_latent_image_low = concat_latent_image
+        concat_latent_image_low = vae.encode(image_low_only[:, :, :, :3])
 
         mask_high_reshaped = mask_high_noise.view(
             1,
