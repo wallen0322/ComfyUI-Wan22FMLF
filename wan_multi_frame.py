@@ -107,12 +107,6 @@ class WanMultiFrameRefToVideo(io.ComfyNode):
                 mask_low_noise[:, :, -4:] = mask_low_value
             else:
                 image[frame_idx:frame_idx + 1] = imgs[i]
-                
-                mask_high_value = 1.0 - ref_strength_high
-                mask_high_noise[:, :, frame_idx:frame_idx + 1] = mask_high_value
-
-                mask_low_value = 1.0 - ref_strength_low
-                mask_low_noise[:, :, frame_idx:frame_idx + 1] = mask_low_value
 
         concat_latent_image = vae.encode(image[:, :, :, :3])
 
@@ -172,68 +166,6 @@ class WanMultiFrameRefToVideo(io.ComfyNode):
                                 adjusted_gradient = 1.0 - (1.0 - spatial_gradient) * combined_weight
                                 
                                 mask_high_noise[:, :, frame_idx, :, :] = current_mask * adjusted_gradient
-
-        if length > 4 and n_imgs >= 2:
-            for i in range(n_imgs - 1):
-                pos1 = int(aligned_positions[i])
-                pos2 = int(aligned_positions[i + 1])
-                
-                if pos2 > pos1 + 4:
-                    start_end = pos1 + 4
-                    transition_end = pos2
-                    
-                    if transition_end > start_end:
-                        transition_length = transition_end - start_end
-                        
-                        for frame_idx in range(start_end, transition_end):
-                            distance_to_start = (frame_idx - start_end) / max(1.0, transition_length)
-                            distance_to_ref = abs(frame_idx - pos2) / max(1.0, protect_zone_size)
-                            
-                            time_weight = 1.0 - distance_to_start * time_smoothing_factor
-                            protect_weight = max(0.5, 1.0 - distance_to_ref) if distance_to_ref > 0 else 1.0
-                            
-                            smooth_factor = time_weight * protect_weight
-                            
-                            if i == 0:
-                                base_mask_value = 1.0 - start_frame_strength_low
-                                smooth_start_offset = 4
-                                if frame_idx < start_end + smooth_start_offset:
-                                    smooth_factor = smooth_factor * (frame_idx - start_end) / max(1.0, smooth_start_offset)
-                            else:
-                                base_mask_value = 1.0 - ref_strength_low
-                            
-                            if i + 1 == n_imgs - 1:
-                                target_mask_value = 1.0 - end_frame_strength_low
-                            else:
-                                target_mask_value = 1.0 - ref_strength_low
-                            
-                            smooth_mask_value = base_mask_value + (target_mask_value - base_mask_value) * (1.0 - smooth_factor)
-                            
-                            mask_low_noise[:, :, frame_idx, :, :] = smooth_mask_value
-            
-            if n_imgs >= 2:
-                last_ref_pos = int(aligned_positions[n_imgs - 1])
-                last_ref_protect_end = last_ref_pos + protect_zone_size
-                end_frame_start = length - 4
-                
-                if end_frame_start > last_ref_protect_end:
-                    transition_length = end_frame_start - last_ref_protect_end
-                    
-                    for frame_idx in range(last_ref_protect_end, end_frame_start):
-                        distance_to_ref = abs(frame_idx - last_ref_pos) / max(1.0, protect_zone_size)
-                        distance_to_end = (end_frame_start - frame_idx) / max(1.0, transition_length)
-                        
-                        protect_weight = max(0.5, 1.0 - distance_to_ref) if frame_idx < last_ref_pos + protect_zone_size else 1.0
-                        time_weight = 1.0 - distance_to_end * time_smoothing_factor
-                        
-                        smooth_factor = time_weight * protect_weight
-                        
-                        base_mask_value = 1.0 - ref_strength_low
-                        target_mask_value = 1.0 - end_frame_strength_low
-                        
-                        smooth_mask_value = base_mask_value + (target_mask_value - base_mask_value) * (1.0 - smooth_factor)
-                        
-                        mask_low_noise[:, :, frame_idx, :, :] = smooth_mask_value
 
         image_low_only = torch.ones((length, height, width, 3), device=device) * 0.5
 
