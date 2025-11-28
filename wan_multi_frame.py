@@ -39,6 +39,8 @@ class WanMultiFrameRefToVideo(io.ComfyNode):
                 io.Float.Input("end_frame_strength_high", default=1.0, min=0.0, max=1.0, step=0.05, round=0.01, display_mode=io.NumberDisplay.slider, optional=True),
                 io.Float.Input("end_frame_strength_low", default=1.0, min=0.0, max=1.0, step=0.05, round=0.01, display_mode=io.NumberDisplay.slider, optional=True),
                 io.Float.Input("structural_repulsion_boost", default=1.0, min=1.0, max=2.0, step=0.05, round=0.01, display_mode=io.NumberDisplay.slider, optional=True),
+                io.Int.Input("protect_zone_size", default=6, min=0, max=20, step=1, display_mode=io.NumberDisplay.slider, optional=True),
+                io.Float.Input("time_smoothing_factor", default=0.2, min=0.0, max=1.0, step=0.05, round=0.01, display_mode=io.NumberDisplay.slider, optional=True),
                 io.ClipVisionOutput.Input("clip_vision_output", optional=True),
             ],
             outputs=[
@@ -52,7 +54,8 @@ class WanMultiFrameRefToVideo(io.ComfyNode):
     @classmethod
     def execute(cls, positive, negative, vae, width, height, length, batch_size, ref_images,
                 mode="NORMAL", ref_positions="", ref_strength_high=0.8, ref_strength_low=0.2,
-                end_frame_strength_high=1.0, end_frame_strength_low=1.0, structural_repulsion_boost=1.0, clip_vision_output=None):
+                end_frame_strength_high=1.0, end_frame_strength_low=1.0, structural_repulsion_boost=1.0,
+                protect_zone_size=6, time_smoothing_factor=0.2, clip_vision_output=None):
         
         spacial_scale = vae.spacial_compression_encode()
         latent_channels = vae.latent_channels
@@ -113,7 +116,6 @@ class WanMultiFrameRefToVideo(io.ComfyNode):
         concat_latent_image = vae.encode(image[:, :, :, :3])
         
         if length > 4 and n_imgs >= 2:
-            protect_zone_size = 6
             
             for i in range(n_imgs - 1):
                 pos1 = int(aligned_positions[i])
@@ -123,7 +125,6 @@ class WanMultiFrameRefToVideo(io.ComfyNode):
                     start_end = pos1 + 4
                     ref_protect_start = max(start_end, pos2 - protect_zone_size)
                     ref_frame_start = pos2
-                    ref_frame_end = min(pos2 + 4, length)
                     
                     if ref_protect_start > start_end:
                         transition_length = ref_protect_start - start_end
@@ -135,13 +136,16 @@ class WanMultiFrameRefToVideo(io.ComfyNode):
                                 distance_to_start = (frame_idx - start_end) / max(1.0, transition_length)
                                 distance_to_ref = abs(frame_idx - ref_frame_start) / max(1.0, protect_zone_size)
                                 
-                                time_weight = 1.0 - distance_to_start * 0.2
+                                time_weight = 1.0 - distance_to_start * time_smoothing_factor
                                 protect_weight = max(0.5, 1.0 - distance_to_ref)
                                 
                                 smooth_factor = time_weight * protect_weight
                                 
                                 if i == 0:
                                     base_mask_value = 0.0
+                                    smooth_start_offset = 4
+                                    if frame_idx < start_end + smooth_start_offset:
+                                        smooth_factor = smooth_factor * (frame_idx - start_end) / max(1.0, smooth_start_offset)
                                 else:
                                     base_mask_value = 1.0 - ref_strength_low
                                 
@@ -154,29 +158,7 @@ class WanMultiFrameRefToVideo(io.ComfyNode):
                                 
                                 mask_low_noise[:, :, frame_idx, :, :] = smooth_mask_value
 
-        if mode == "SINGLE_PERSON":
-            concat_latent_image_high = concat_latent_image
-        else:
-            need_selective_image_high = (ref_strength_high == 0.0) or (end_frame_strength_high == 0.0)
-
-            if need_selective_image_high:
-                image_high_only = torch.ones((length, height, width, 3), device=device) * 0.5
-
-                if n_imgs >= 1:
-                    frame_idx_first = int(aligned_positions[0])
-                    image_high_only[frame_idx_first:frame_idx_first + 1] = imgs[0]
-
-                if ref_strength_high > 0.0:
-                    for i in range(1, n_imgs - 1):
-                        frame_idx_mid = int(aligned_positions[i])
-                        image_high_only[frame_idx_mid:frame_idx_mid + 1] = imgs[i]
-
-                if n_imgs >= 2 and end_frame_strength_high > 0.0:
-                    image_high_only[-1:] = imgs[-1]
-
-                concat_latent_image_high = vae.encode(image_high_only[:, :, :, :3])
-            else:
-                concat_latent_image_high = concat_latent_image
+        concat_latent_image_high = concat_latent_image
 
         if structural_repulsion_boost > 1.001 and length > 4 and n_imgs >= 2:
             mask_h, mask_w = mask_high_noise.shape[-2], mask_high_noise.shape[-1]
@@ -207,7 +189,6 @@ class WanMultiFrameRefToVideo(io.ComfyNode):
                 
                 if pos2 > pos1 + 4:
                     start_end = pos1 + 4
-                    protect_zone_size = 6
                     ref_protect_start = max(start_end, pos2 - protect_zone_size)
                     ref_frame_start = pos2
                     transition_end = min(ref_protect_start, length)
@@ -227,7 +208,7 @@ class WanMultiFrameRefToVideo(io.ComfyNode):
                                 distance_to_start = (frame_idx - start_end) / max(1.0, transition_length)
                                 distance_to_ref = abs(frame_idx - ref_frame_start) / max(1.0, protect_zone_size)
                                 
-                                time_weight = 1.0 - distance_to_start * 0.3
+                                time_weight = 1.0 - distance_to_start * time_smoothing_factor * 1.5
                                 protect_weight = max(0.3, 1.0 - distance_to_ref)
                                 
                                 combined_weight = time_weight * protect_weight
@@ -235,46 +216,7 @@ class WanMultiFrameRefToVideo(io.ComfyNode):
                                 
                                 mask_high_noise[:, :, frame_idx, :, :] = current_mask * adjusted_gradient
 
-        if mode == "SINGLE_PERSON":
-            mask_low_noise = mask_base.clone()
-            if n_imgs >= 1:
-                frame_idx_first = int(aligned_positions[0])
-                mask_low_noise[:, :, frame_idx_first:frame_idx_first + 4] = 0.0
-
-            if n_imgs >= 2:
-                mask_low_value = 1.0 - end_frame_strength_low
-                mask_low_noise[:, :, -4:] = mask_low_value
-
-            image_low_only = torch.ones((length, height, width, 3), device=device) * 0.5
-            if n_imgs >= 1:
-                frame_idx_first = int(aligned_positions[0])
-                image_low_only[frame_idx_first:frame_idx_first + 1] = imgs[0]
-
-            if n_imgs >= 2 and end_frame_strength_low > 0.0:
-                image_low_only[-1:] = imgs[-1]
-
-            concat_latent_image_low = vae.encode(image_low_only[:, :, :, :3])
-        else:
-            need_selective_image = (ref_strength_low == 0.0) or (end_frame_strength_low == 0.0)
-
-            if need_selective_image:
-                image_low_only = torch.ones((length, height, width, 3), device=device) * 0.5
-
-                if n_imgs >= 1:
-                    frame_idx_first = int(aligned_positions[0])
-                    image_low_only[frame_idx_first:frame_idx_first + 1] = imgs[0]
-
-                if ref_strength_low > 0.0:
-                    for i in range(1, n_imgs - 1):
-                        frame_idx_mid = int(aligned_positions[i])
-                        image_low_only[frame_idx_mid:frame_idx_mid + 1] = imgs[i]
-
-                if n_imgs >= 2 and end_frame_strength_low > 0.0:
-                    image_low_only[-1:] = imgs[-1]
-
-                concat_latent_image_low = vae.encode(image_low_only[:, :, :, :3])
-            else:
-                concat_latent_image_low = concat_latent_image
+        concat_latent_image_low = concat_latent_image
 
         mask_high_reshaped = mask_high_noise.view(1, mask_high_noise.shape[2] // 4, 4, mask_high_noise.shape[3], mask_high_noise.shape[4]).transpose(1, 2)
         mask_low_reshaped = mask_low_noise.view(1, mask_low_noise.shape[2] // 4, 4, mask_low_noise.shape[3], mask_low_noise.shape[4]).transpose(1, 2)
