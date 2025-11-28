@@ -121,6 +121,17 @@ class WanFirstMiddleLastFrameToVideo(io.ComfyNode):
                     display_mode=io.NumberDisplay.slider,
                     optional=True,
                 ),
+                io.Float.Input(
+                    "high_noise_mid_image_strength",
+                    default=0.75,
+                    min=0.5,
+                    max=1.0,
+                    step=0.05,
+                    round=0.01,
+                    display_mode=io.NumberDisplay.slider,
+                    optional=True,
+                    tooltip="高噪阶段中间帧参考图像强度衰减，降低此值可减少中间帧闪烁和突变。值越小，参考图像影响越弱。",
+                ),
                 io.ClipVisionOutput.Input("clip_vision_start_image", optional=True),
                 io.ClipVisionOutput.Input("clip_vision_middle_image", optional=True),
                 io.ClipVisionOutput.Input("clip_vision_end_image", optional=True),
@@ -153,6 +164,7 @@ class WanFirstMiddleLastFrameToVideo(io.ComfyNode):
         low_noise_mid_strength=0.2,
         low_noise_end_strength=1.0,
         structural_repulsion_boost=1.0,
+        high_noise_mid_image_strength=0.75,
         clip_vision_start_image=None,
         clip_vision_middle_image=None,
         clip_vision_end_image=None,
@@ -215,7 +227,15 @@ class WanFirstMiddleLastFrameToVideo(io.ComfyNode):
             mask_low_noise[:, :, :start_image.shape[0] + 3] = low_start_mask_value
 
         if middle_image is not None:
-            image[middle_idx:middle_idx + 1] = middle_image
+            # 高噪阶段：为中间帧参考图像应用强度衰减
+            # 强度衰减：混合参考图像和中性图像，降低整体强度
+            # 这样可以让参考图像在采样早期影响较小，随着采样进行影响相对增强，减少闪烁
+            mid_image_blended = middle_image.clone()
+            blend_factor = high_noise_mid_image_strength
+            mid_image_blended = mid_image_blended * blend_factor + 0.5 * (1.0 - blend_factor)
+            
+            # 中间帧参考图像只设置在1帧位置
+            image[middle_idx:middle_idx + 1] = mid_image_blended
             
             start_range = max(0, middle_idx)
             end_range = min(length, middle_idx + 4)
@@ -341,7 +361,13 @@ class WanFirstMiddleLastFrameToVideo(io.ComfyNode):
             image_low_only[:start_image.shape[0]] = start_image
         
         if middle_image is not None and low_noise_mid_strength > 0.0:
-            image_low_only[middle_idx:middle_idx + 1] = middle_image
+            # 低噪阶段：为中间帧参考图像应用轻微强度衰减
+            # 低噪阶段的强度衰减相对较小，因为低噪阶段需要更精确的控制
+            mid_image_low_blended = middle_image.clone()
+            low_blend_factor = 0.9  # 低噪阶段保持较高强度，只做轻微衰减以减少突变
+            mid_image_low_blended = mid_image_low_blended * low_blend_factor + 0.5 * (1.0 - low_blend_factor)
+            
+            image_low_only[middle_idx:middle_idx + 1] = mid_image_low_blended
         
         if end_image is not None and low_noise_end_strength > 0.0:
             image_low_only[-end_image.shape[0]:] = end_image
