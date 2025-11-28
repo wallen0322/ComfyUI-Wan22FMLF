@@ -221,7 +221,7 @@ class WanMultiFrameRefToVideo(io.ComfyNode):
                 
                 if pos2 - 1 >= 0:
                     mask_after = mask_low_noise[:, :, pos2 - 1, :, :].mean().item()
-            else:
+                else:
                     mask_after = mask_low_noise[:, :, 0, :, :].mean().item()
                 
                 mask_at_ref = mask_low_noise[:, :, pos2, :, :].mean().item()
