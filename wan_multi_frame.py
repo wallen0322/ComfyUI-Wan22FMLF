@@ -11,8 +11,8 @@ import comfy.utils
 
 class WanMultiFrameRefToVideo(io.ComfyNode):
     
-    RETURN_TYPES = ("CONDITIONING", "CONDITIONING", "CONDITIONING", "CONDITIONING", "LATENT")
-    RETURN_NAMES = ("positive_high", "positive_low", "negative_high", "negative_low", "latent")
+    RETURN_TYPES = ("CONDITIONING", "CONDITIONING", "CONDITIONING", "LATENT")
+    RETURN_NAMES = ("positive_high", "positive_low", "negative", "latent")
     CATEGORY = "ComfyUI-Wan22FMLF"
     FUNCTION = "execute"
     OUTPUT_NODE = False
@@ -36,6 +36,7 @@ class WanMultiFrameRefToVideo(io.ComfyNode):
                 io.String.Input("ref_positions", default="", optional=True),
                 io.Float.Input("ref_strength_high", default=0.8, min=0.0, max=1.0, step=0.05, round=0.01, display_mode=io.NumberDisplay.slider, optional=True),
                 io.Float.Input("ref_strength_low", default=0.2, min=0.0, max=1.0, step=0.05, round=0.01, display_mode=io.NumberDisplay.slider, optional=True),
+                io.Float.Input("start_frame_strength_low", default=1.0, min=0.0, max=1.0, step=0.05, round=0.01, display_mode=io.NumberDisplay.slider, optional=True),
                 io.Float.Input("end_frame_strength_high", default=1.0, min=0.0, max=1.0, step=0.05, round=0.01, display_mode=io.NumberDisplay.slider, optional=True),
                 io.Float.Input("end_frame_strength_low", default=1.0, min=0.0, max=1.0, step=0.05, round=0.01, display_mode=io.NumberDisplay.slider, optional=True),
                 io.Float.Input("structural_repulsion_boost", default=1.0, min=1.0, max=2.0, step=0.05, round=0.01, display_mode=io.NumberDisplay.slider, optional=True),
@@ -46,8 +47,7 @@ class WanMultiFrameRefToVideo(io.ComfyNode):
             outputs=[
                 io.Conditioning.Output(display_name="positive_high"),
                 io.Conditioning.Output(display_name="positive_low"),
-                io.Conditioning.Output(display_name="negative_high"),
-                io.Conditioning.Output(display_name="negative_low"),
+                io.Conditioning.Output(display_name="negative"),
                 io.Latent.Output(display_name="latent"),
             ],
         )
@@ -55,8 +55,8 @@ class WanMultiFrameRefToVideo(io.ComfyNode):
     @classmethod
     def execute(cls, positive, negative, vae, width, height, length, batch_size, ref_images,
                 mode="NORMAL", ref_positions="", ref_strength_high=0.8, ref_strength_low=0.2,
-                end_frame_strength_high=1.0, end_frame_strength_low=1.0, structural_repulsion_boost=1.0,
-                protect_zone_size=6, time_smoothing_factor=0.2, clip_vision_output=None):
+                start_frame_strength_low=1.0, end_frame_strength_high=1.0, end_frame_strength_low=1.0, 
+                structural_repulsion_boost=1.0, protect_zone_size=6, time_smoothing_factor=0.2, clip_vision_output=None):
         
         spacial_scale = vae.spacial_compression_encode()
         latent_channels = vae.latent_channels
@@ -92,9 +92,13 @@ class WanMultiFrameRefToVideo(io.ComfyNode):
             frame_idx = int(pos)
 
             if i == 0:
-                image[frame_idx:frame_idx + 1] = imgs[i]
-                mask_high_noise[:, :, frame_idx:frame_idx + 4] = 0.0
-                mask_low_noise[:, :, frame_idx:frame_idx + 4] = 0.0
+                start_img_len = imgs[i].shape[0]
+                image[frame_idx:frame_idx + start_img_len] = imgs[i]
+                mask_range = min(frame_idx + start_img_len + 3, length)
+                mask_high_noise[:, :, frame_idx:mask_range] = 0.0
+                
+                low_start_mask_value = 1.0 - start_frame_strength_low
+                mask_low_noise[:, :, frame_idx:mask_range] = low_start_mask_value
             elif i == n_imgs - 1:
                 image[-1:] = imgs[i]
 
@@ -115,49 +119,6 @@ class WanMultiFrameRefToVideo(io.ComfyNode):
                 mask_low_noise[:, :, start_range:end_range] = mask_low_value
 
         concat_latent_image = vae.encode(image[:, :, :, :3])
-        
-        if length > 4 and n_imgs >= 2:
-            
-            for i in range(n_imgs - 1):
-                pos1 = int(aligned_positions[i])
-                pos2 = int(aligned_positions[i + 1])
-                
-                if pos2 > pos1 + 4:
-                    start_end = pos1 + 4
-                    ref_protect_start = max(start_end, pos2 - protect_zone_size)
-                    ref_frame_start = pos2
-                    
-                    if ref_protect_start > start_end:
-                        transition_length = ref_protect_start - start_end
-                        
-                        for frame_idx in range(start_end, ref_protect_start):
-                            if frame_idx < ref_frame_start:
-                                current_mask = mask_low_noise[:, :, frame_idx, :, :]
-                                
-                                distance_to_start = (frame_idx - start_end) / max(1.0, transition_length)
-                                distance_to_ref = abs(frame_idx - ref_frame_start) / max(1.0, protect_zone_size)
-                                
-                                time_weight = 1.0 - distance_to_start * time_smoothing_factor
-                                protect_weight = max(0.5, 1.0 - distance_to_ref)
-                                
-                                smooth_factor = time_weight * protect_weight
-                                
-                                if i == 0:
-                                    base_mask_value = 0.0
-                                    smooth_start_offset = 4
-                                    if frame_idx < start_end + smooth_start_offset:
-                                        smooth_factor = smooth_factor * (frame_idx - start_end) / max(1.0, smooth_start_offset)
-                                else:
-                                    base_mask_value = 1.0 - ref_strength_low
-                                
-                                if i + 1 == n_imgs - 1:
-                                    target_mask_value = 1.0 - end_frame_strength_low
-                                else:
-                                    target_mask_value = 1.0 - ref_strength_low
-                                
-                                smooth_mask_value = base_mask_value + (target_mask_value - base_mask_value) * (1.0 - smooth_factor)
-                                
-                                mask_low_noise[:, :, frame_idx, :, :] = smooth_mask_value
 
         concat_latent_image_high = concat_latent_image
 
@@ -233,27 +194,19 @@ class WanMultiFrameRefToVideo(io.ComfyNode):
         })
         
         
-        negative_high_noise = node_helpers.conditioning_set_values(negative, {
+        negative_out = node_helpers.conditioning_set_values(negative, {
             "concat_latent_image": concat_latent_image_high,
             "concat_mask": mask_high_reshaped
-        })
-        
-        negative_low_noise = node_helpers.conditioning_set_values(negative, {
-            "concat_latent_image": concat_latent_image_low,
-            "concat_mask": mask_low_reshaped
         })
         
         if clip_vision_output is not None:
             positive_low_noise = node_helpers.conditioning_set_values(positive_low_noise,
                                                                    {"clip_vision_output": clip_vision_output})
             
-            negative_high_noise = node_helpers.conditioning_set_values(negative_high_noise, 
-                                                             {"clip_vision_output": clip_vision_output})
-            
-            negative_low_noise = node_helpers.conditioning_set_values(negative_low_noise, 
+            negative_out = node_helpers.conditioning_set_values(negative_out, 
                                                              {"clip_vision_output": clip_vision_output})
         
-        return io.NodeOutput(positive_high_noise, positive_low_noise, negative_high_noise, negative_low_noise, {"samples": latent})
+        return io.NodeOutput(positive_high_noise, positive_low_noise, negative_out, {"samples": latent})
 
     @classmethod
     def _resize_images(cls, images, width, height, device):
