@@ -8,7 +8,6 @@ import comfy.utils
 import comfy.clip_vision
 from typing import Optional, Tuple, Any
 
-
 class WanAdvancedI2V(io.ComfyNode):
     
     RETURN_TYPES = ("CONDITIONING", "CONDITIONING", "CONDITIONING", "LATENT", "INT", "INT", "INT")
@@ -89,8 +88,13 @@ class WanAdvancedI2V(io.ComfyNode):
         has_motion_frames = (motion_frames is not None and motion_frames.shape[0] > 0)
         is_pure_triple_mode = (not has_motion_frames and long_video_mode == "DISABLED")
         
+        if motion_frames is not None:
+            motion_frames = comfy.utils.common_upscale(
+                motion_frames.movedim(-1, 1), width, height, "area", "center"
+            ).movedim(1, -1)
+        
         if video_frame_offset >= 0:
-            if (long_video_mode == "AUTO_CONTINUE" or long_video_mode == "SVI_SHOT") and has_motion_frames and continue_frames_count > 0:
+            if (long_video_mode == "AUTO_CONTINUE" or long_video_mode == "SVI_SHOT") and motion_frames is not None and continue_frames_count > 0:
                 actual_count = min(continue_frames_count, motion_frames.shape[0])
                 motion_frames = motion_frames[-actual_count:]
                 video_frame_offset = max(0, video_frame_offset - motion_frames.shape[0])
@@ -107,11 +111,6 @@ class WanAdvancedI2V(io.ComfyNode):
                     end_image = end_image[video_frame_offset:] if end_image.shape[0] > video_frame_offset else None
             
             next_offset = video_frame_offset + length
-        
-        if motion_frames is not None:
-            motion_frames = comfy.utils.common_upscale(
-                motion_frames.movedim(-1, 1), width, height, "area", "center"
-            ).movedim(1, -1)
         
         if start_image is not None:
             if is_pure_triple_mode:
@@ -150,13 +149,13 @@ class WanAdvancedI2V(io.ComfyNode):
         svi_shot_second_pass = False
         
         if long_video_mode == "SVI_SHOT" and start_image is not None:
+            image[:start_image.shape[0]] = start_image[:, :, :, :3]
+            start_latent_frames = ((start_image.shape[0] - 1) // 4) + 1
+            mask_high_noise[:, :, :start_latent_frames * 4] = 0.0
+            mask_low_noise[:, :, :start_latent_frames * 4] = max(0.0, 1.0 - low_noise_start_strength)
+            
             if has_motion_frames:
                 svi_shot_second_pass = True
-            else:
-                image[:start_image.shape[0]] = start_image[:, :, :, :3]
-                start_latent_frames = ((start_image.shape[0] - 1) // 4) + 1
-                mask_high_noise[:, :, :start_latent_frames * 4] = 0.0
-                mask_low_noise[:, :, :start_latent_frames * 4] = max(0.0, 1.0 - low_noise_start_strength)
         
         if has_motion_frames and not (long_video_mode == "SVI_SHOT" and not svi_shot_second_pass):
             image[:motion_frames.shape[0]] = motion_frames[:, :, :, :3]
@@ -396,7 +395,6 @@ class WanAdvancedI2V(io.ComfyNode):
         result.penultimate_hidden_states = combined_states
         return result
 
-
 class WanAdvancedExtractLastFrames(io.ComfyNode):
     
     @classmethod
@@ -424,7 +422,6 @@ class WanAdvancedExtractLastFrames(io.ComfyNode):
         last_latent = samples["samples"][:, :, -latent_frames:].clone()
         out = {"samples": last_latent}
         return io.NodeOutput(out)
-
 
 class WanAdvancedExtractLastImages(io.ComfyNode):
     
