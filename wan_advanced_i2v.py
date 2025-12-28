@@ -6,7 +6,9 @@ import node_helpers
 import comfy
 import comfy.utils
 import comfy.clip_vision
+import comfy.latent_formats
 from typing import Optional, Tuple, Any
+
 
 class WanAdvancedI2V(io.ComfyNode):
     
@@ -37,7 +39,7 @@ class WanAdvancedI2V(io.ComfyNode):
                 io.Float.Input("middle_frame_ratio", default=0.5, min=0.0, max=1.0, step=0.01, round=0.01, display_mode=io.NumberDisplay.slider, optional=True),
                 io.Image.Input("motion_frames", optional=True),
                 io.Int.Input("video_frame_offset", default=0, min=0, max=1000000, step=1, display_mode=io.NumberDisplay.number, optional=True),
-                io.Combo.Input("long_video_mode", ["DISABLED", "AUTO_CONTINUE", "SVI_SHOT"], default="DISABLED", optional=True),
+                io.Combo.Input("long_video_mode", ["DISABLED", "AUTO_CONTINUE", "SVI"], default="DISABLED", optional=True),
                 io.Int.Input("continue_frames_count", default=5, min=0, max=20, step=1, display_mode=io.NumberDisplay.number, optional=True),
                 io.Float.Input("high_noise_mid_strength", default=0.8, min=0.0, max=1.0, step=0.05, round=0.01, display_mode=io.NumberDisplay.slider, optional=True),
                 io.Float.Input("low_noise_start_strength", default=1.0, min=0.0, max=1.0, step=0.05, round=0.01, display_mode=io.NumberDisplay.slider, optional=True),
@@ -48,6 +50,7 @@ class WanAdvancedI2V(io.ComfyNode):
                 io.ClipVisionOutput.Input("clip_vision_middle_image", optional=True),
                 io.ClipVisionOutput.Input("clip_vision_end_image", optional=True),
                 io.Boolean.Input("enable_middle_frame", default=True, optional=True),
+                io.Latent.Input("prev_latent", optional=True),
             ],
             outputs=[
                 io.Conditioning.Output(display_name="positive_high"),
@@ -69,7 +72,8 @@ class WanAdvancedI2V(io.ComfyNode):
                 low_noise_mid_strength=0.2, low_noise_end_strength=1.0,
                 structural_repulsion_boost=1.0,
                 clip_vision_start_image=None, clip_vision_middle_image=None,
-                clip_vision_end_image=None, enable_middle_frame=True):
+                clip_vision_end_image=None, enable_middle_frame=True,
+                prev_latent=None):
         
         spacial_scale = vae.spacial_compression_encode()
         latent_channels = vae.latent_channels
@@ -88,13 +92,8 @@ class WanAdvancedI2V(io.ComfyNode):
         has_motion_frames = (motion_frames is not None and motion_frames.shape[0] > 0)
         is_pure_triple_mode = (not has_motion_frames and long_video_mode == "DISABLED")
         
-        if motion_frames is not None:
-            motion_frames = comfy.utils.common_upscale(
-                motion_frames.movedim(-1, 1), width, height, "area", "center"
-            ).movedim(1, -1)
-        
         if video_frame_offset >= 0:
-            if (long_video_mode == "AUTO_CONTINUE" or long_video_mode == "SVI_SHOT") and motion_frames is not None and continue_frames_count > 0:
+            if (long_video_mode == "AUTO_CONTINUE" or long_video_mode == "SVI") and has_motion_frames and continue_frames_count > 0:
                 actual_count = min(continue_frames_count, motion_frames.shape[0])
                 motion_frames = motion_frames[-actual_count:]
                 video_frame_offset = max(0, video_frame_offset - motion_frames.shape[0])
@@ -111,6 +110,11 @@ class WanAdvancedI2V(io.ComfyNode):
                     end_image = end_image[video_frame_offset:] if end_image.shape[0] > video_frame_offset else None
             
             next_offset = video_frame_offset + length
+        
+        if motion_frames is not None:
+            motion_frames = comfy.utils.common_upscale(
+                motion_frames.movedim(-1, 1), width, height, "area", "center"
+            ).movedim(1, -1)
         
         if start_image is not None:
             if is_pure_triple_mode:
@@ -146,24 +150,160 @@ class WanAdvancedI2V(io.ComfyNode):
         mask_high_noise = mask_base.clone()
         mask_low_noise = mask_base.clone()
         
-        svi_shot_second_pass = False
-        
-        if long_video_mode == "SVI_SHOT" and start_image is not None:
-            image[:start_image.shape[0]] = start_image[:, :, :, :3]
-            start_latent_frames = ((start_image.shape[0] - 1) // 4) + 1
-            mask_high_noise[:, :, :start_latent_frames * 4] = 0.0
-            mask_low_noise[:, :, :start_latent_frames * 4] = max(0.0, 1.0 - low_noise_start_strength)
+        svi_continue_mode = False
+
+        # --- SVI Mode Logic ---
+        if long_video_mode == 'SVI':
+            # SVI mode uses latent-space conditioning similar to WanImageToVideoSVIPro
+            spacial_scale = vae.spacial_compression_encode()
+            latent_channels = vae.latent_channels
+            total_latents = ((length - 1) // 4) + 1
+            H = height // spacial_scale
+            W = width // spacial_scale
             
-            if has_motion_frames:
-                svi_shot_second_pass = True
-        
-        if has_motion_frames and not (long_video_mode == "SVI_SHOT" and not svi_shot_second_pass):
+            # Check if we have prev_latent for continuation
+            has_prev_latent = (prev_latent is not None and prev_latent.get("samples") is not None)
+            
+            if has_prev_latent and continue_frames_count > 0:
+                # SVI Continue: Use prev_latent as continuation reference
+                svi_continue_mode = True
+                
+                # Encode start_image as anchor latent
+                if start_image is not None:
+                    anchor_latent = vae.encode(start_image[:1, :, :, :3])
+                else:
+                    # If no start_image, create empty anchor
+                    anchor_latent = torch.zeros([1, latent_channels, 1, H, W], 
+                                               device=device, dtype=latent.dtype)
+                
+                # Use prev_latent directly (already encoded)
+                prev_samples = prev_latent["samples"]
+                motion_latent_count = min(prev_samples.shape[2], continue_frames_count)
+                motion_latent = prev_samples[:, :, -motion_latent_count:].clone()
+                
+                # Calculate padding size
+                padding_size = total_latents - anchor_latent.shape[2] - motion_latent.shape[2]
+                
+                # Concatenate anchor and motion latents
+                image_cond_latent = torch.cat([anchor_latent, motion_latent], dim=2)
+                
+                # Create padding with process_out
+                padding = torch.zeros(1, latent_channels, padding_size, H, W, 
+                                     dtype=anchor_latent.dtype, device=anchor_latent.device)
+                padding = comfy.latent_formats.Wan21().process_out(padding)
+                image_cond_latent = torch.cat([image_cond_latent, padding], dim=2)
+                
+                # Create mask: 0 for anchor frame, 1 for rest (same as reference)
+                mask_svi = torch.ones((1, 1, total_latents, H, W), 
+                                     device=device, dtype=anchor_latent.dtype)
+                mask_svi[:, :, :1] = 0.0
+                
+                # Set conditioning (no reshape needed, same as reference)
+                positive_high_noise = node_helpers.conditioning_set_values(positive, {
+                    "concat_latent_image": image_cond_latent,
+                    "concat_mask": mask_svi
+                })
+                
+                positive_low_noise = node_helpers.conditioning_set_values(positive, {
+                    "concat_latent_image": image_cond_latent,
+                    "concat_mask": mask_svi
+                })
+                
+                negative_out = node_helpers.conditioning_set_values(negative, {
+                    "concat_latent_image": image_cond_latent,
+                    "concat_mask": mask_svi
+                })
+                
+                # Handle clip vision
+                clip_vision_output = cls._merge_clip_vision_outputs(
+                    clip_vision_start_image, 
+                    clip_vision_middle_image, 
+                    clip_vision_end_image
+                )
+                
+                if clip_vision_output is not None:
+                    positive_low_noise = node_helpers.conditioning_set_values(
+                        positive_low_noise, 
+                        {"clip_vision_output": clip_vision_output}
+                    )
+                    negative_out = node_helpers.conditioning_set_values(
+                        negative_out,
+                        {"clip_vision_output": clip_vision_output}
+                    )
+                
+                out_latent = {"samples": latent}
+                
+                return io.NodeOutput(positive_high_noise, positive_low_noise, negative_out, out_latent,
+                        trim_latent, trim_image, next_offset)
+            
+            elif start_image is not None:
+                # SVI First: Use start_image as the only anchor
+                svi_continue_mode = False
+                
+                # Encode start_image as anchor latent
+                anchor_latent = vae.encode(start_image[:1, :, :, :3])
+                
+                # Calculate padding size
+                padding_size = total_latents - anchor_latent.shape[2]
+                
+                # Create padding with process_out
+                padding = torch.zeros(1, latent_channels, padding_size, H, W, 
+                                     dtype=anchor_latent.dtype, device=anchor_latent.device)
+                padding = comfy.latent_formats.Wan21().process_out(padding)
+                image_cond_latent = torch.cat([anchor_latent, padding], dim=2)
+                
+                # Create mask: 0 for anchor frame, 1 for rest (same as reference)
+                mask_svi = torch.ones((1, 1, total_latents, H, W), 
+                                     device=device, dtype=anchor_latent.dtype)
+                mask_svi[:, :, :1] = 0.0
+                
+                # Set conditioning (no reshape needed, same as reference)
+                positive_high_noise = node_helpers.conditioning_set_values(positive, {
+                    "concat_latent_image": image_cond_latent,
+                    "concat_mask": mask_svi
+                })
+                
+                positive_low_noise = node_helpers.conditioning_set_values(positive, {
+                    "concat_latent_image": image_cond_latent,
+                    "concat_mask": mask_svi
+                })
+                
+                negative_out = node_helpers.conditioning_set_values(negative, {
+                    "concat_latent_image": image_cond_latent,
+                    "concat_mask": mask_svi
+                })
+                
+                # Handle clip vision
+                clip_vision_output = cls._merge_clip_vision_outputs(
+                    clip_vision_start_image, 
+                    clip_vision_middle_image, 
+                    clip_vision_end_image
+                )
+                
+                if clip_vision_output is not None:
+                    positive_low_noise = node_helpers.conditioning_set_values(
+                        positive_low_noise, 
+                        {"clip_vision_output": clip_vision_output}
+                    )
+                    negative_out = node_helpers.conditioning_set_values(
+                        negative_out,
+                        {"clip_vision_output": clip_vision_output}
+                    )
+                
+                out_latent = {"samples": latent}
+                
+                return io.NodeOutput(positive_high_noise, positive_low_noise, negative_out, out_latent,
+                        trim_latent, trim_image, next_offset)
+        # --- End of SVI Mode Logic ---
+
+        # Original logic for other modes (AUTO_CONTINUE, NORMAL)
+        if has_motion_frames and long_video_mode != 'SVI':
             image[:motion_frames.shape[0]] = motion_frames[:, :, :, :3]
             
             motion_latent_frames = ((motion_frames.shape[0] - 1) // 4) + 1
             mask_high_noise[:, :, :motion_latent_frames * 4] = 0.0
             
-            if not svi_shot_second_pass:
+            if not svi_continue_mode:
                 mask_low_noise[:, :, :motion_latent_frames * 4] = 0.0
             
             if middle_image is not None and enable_middle_frame:
@@ -281,17 +421,15 @@ class WanAdvancedI2V(io.ComfyNode):
                         current_mask = mask_high_noise[:, :, frame_idx, :, :]
                         mask_high_noise[:, :, frame_idx, :, :] = current_mask * spatial_gradient
         
-        if svi_shot_second_pass:
+        if svi_continue_mode:
+            # Second pass: motion_frames is injected into latent first frame
+            # start_image used for low noise conditioning as concat image
             image_low = torch.ones((length, height, width, 3), device=device) * 0.5
             
-            if mode == "SINGLE_PERSON":
-                if start_image is not None:
-                    image_low[0] = start_image[0, :, :, :3]
-                    mask_low_noise[:, :, 0:4] = 0.0
-            else:
-                if motion_frames is not None:
-                    image_low[0] = motion_frames[0, :, :, :3]
-                    mask_low_noise[:, :, 0:1] = 0.0
+            if start_image is not None:
+                image_low[:start_image.shape[0]] = start_image[:, :, :, :3]
+                start_latent_frames = ((start_image.shape[0] - 1) // 4) + 1
+                mask_low_noise[:, :, :start_latent_frames * 4] = 0.0
             
             concat_latent_image_low = vae.encode(image_low[:, :, :, :3])
         elif mode == "SINGLE_PERSON":
@@ -395,6 +533,7 @@ class WanAdvancedI2V(io.ComfyNode):
         result.penultimate_hidden_states = combined_states
         return result
 
+
 class WanAdvancedExtractLastFrames(io.ComfyNode):
     
     @classmethod
@@ -422,6 +561,7 @@ class WanAdvancedExtractLastFrames(io.ComfyNode):
         last_latent = samples["samples"][:, :, -latent_frames:].clone()
         out = {"samples": last_latent}
         return io.NodeOutput(out)
+
 
 class WanAdvancedExtractLastImages(io.ComfyNode):
     
