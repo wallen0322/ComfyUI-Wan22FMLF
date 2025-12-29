@@ -21,6 +21,8 @@
 
 ### SVI PRO - 连续性优化
 
+**SVI 项目地址**：https://github.com/vita-epfl/Stable-Video-Infinity
+
 **SVI 模式第二次采样逻辑优化**
 - ✅ `motion_frames`（上一次采样的最后一帧）现在直接注入到 latent 的第一帧，确保帧间连续性
 - ✅ `start_image` 作为 concat image 注入条件，提供视觉引导
