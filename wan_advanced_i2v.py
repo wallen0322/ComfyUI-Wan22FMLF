@@ -181,24 +181,19 @@ class WanAdvancedI2V(io.ComfyNode):
                 motion_latent_count = min(prev_samples.shape[2], continue_frames_count)
                 motion_latent = prev_samples[:, :, -motion_latent_count:].clone()
                 
-                # Calculate padding size
                 padding_size = total_latents - anchor_latent.shape[2] - motion_latent.shape[2]
                 
-                # Concatenate anchor and motion latents
                 image_cond_latent = torch.cat([anchor_latent, motion_latent], dim=2)
                 
-                # Create padding with process_out
                 padding = torch.zeros(1, latent_channels, padding_size, H, W, 
                                      dtype=anchor_latent.dtype, device=anchor_latent.device)
                 padding = comfy.latent_formats.Wan21().process_out(padding)
                 image_cond_latent = torch.cat([image_cond_latent, padding], dim=2)
                 
-                # Create mask: 0 for anchor frame, 1 for rest (same as reference)
                 mask_svi = torch.ones((1, 1, total_latents, H, W), 
                                      device=device, dtype=anchor_latent.dtype)
                 mask_svi[:, :, :1] = 0.0
                 
-                # Set conditioning (no reshape needed, same as reference)
                 positive_high_noise = node_helpers.conditioning_set_values(positive, {
                     "concat_latent_image": image_cond_latent,
                     "concat_mask": mask_svi
@@ -252,12 +247,10 @@ class WanAdvancedI2V(io.ComfyNode):
                 padding = comfy.latent_formats.Wan21().process_out(padding)
                 image_cond_latent = torch.cat([anchor_latent, padding], dim=2)
                 
-                # Create mask: 0 for anchor frame, 1 for rest (same as reference)
                 mask_svi = torch.ones((1, 1, total_latents, H, W), 
                                      device=device, dtype=anchor_latent.dtype)
                 mask_svi[:, :, :1] = 0.0
                 
-                # Set conditioning (no reshape needed, same as reference)
                 positive_high_noise = node_helpers.conditioning_set_values(positive, {
                     "concat_latent_image": image_cond_latent,
                     "concat_mask": mask_svi
