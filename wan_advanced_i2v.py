@@ -183,7 +183,9 @@ class WanAdvancedI2V(io.ComfyNode):
                 
                 # Use prev_latent directly (already encoded)
                 prev_samples = prev_latent["samples"]
-                motion_latent_count = min(prev_samples.shape[2], continue_frames_count)
+                # Convert continue_frames_count (image frames) to latent frames
+                # 1 latent frame = 4 image frames
+                motion_latent_count = min(prev_samples.shape[2], ((continue_frames_count - 1) // 4) + 1)
                 motion_latent = prev_samples[:, :, -motion_latent_count:].clone()
                 
                 # Build image_cond_latent by inserting latents at correct positions
