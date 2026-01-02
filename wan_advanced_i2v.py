@@ -155,9 +155,9 @@ class WanAdvancedI2V(io.ComfyNode):
 
         # --- Latent Continue Mode Logic ---
         if long_video_mode == 'LATENT_CONTINUE':
-            # When prev_latent is provided, inject last latent and lock it
+            # When prev_latent is provided and continue_frames_count > 0, inject last latent and lock it
             has_prev_latent = (prev_latent is not None and prev_latent.get("samples") is not None)
-            if has_prev_latent:
+            if has_prev_latent and continue_frames_count > 0:
                 prev_samples = prev_latent["samples"]
                 # Inject last latent from prev_latent into first position of current latent
                 if prev_samples.shape[2] > 0:
@@ -166,6 +166,14 @@ class WanAdvancedI2V(io.ComfyNode):
                     # Lock first latent (mask = 0.0)
                     mask_high_noise[:, :, :4] = 0.0
                     mask_low_noise[:, :, :4] = 0.0
+                    
+                    # Decode last latent to image and inject into condition
+                    last_latent = prev_samples[:, :, -1:].clone()
+                    last_latent_dict = {"samples": last_latent}
+                    last_image = vae.decode(last_latent_dict)
+                    # Inject decoded image into first frame of image for conditioning
+                    if last_image.shape[0] > 0:
+                        image[0:1] = last_image[0:1, :, :, :3]
         # --- End of Latent Continue Mode Logic ---
 
         # --- SVI Mode Logic ---
