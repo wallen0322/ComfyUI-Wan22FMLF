@@ -169,8 +169,7 @@ class WanAdvancedI2V(io.ComfyNode):
                     
                     # Decode last latent to image and inject into condition
                     last_latent = prev_samples[:, :, -1:].clone()
-                    last_latent_dict = {"samples": last_latent}
-                    last_image = vae.decode(last_latent_dict)
+                    last_image = vae.decode(last_latent)
                     # Inject decoded image into first frame of image for conditioning
                     if last_image.shape[0] > 0:
                         image[0:1] = last_image[0:1, :, :, :3]
