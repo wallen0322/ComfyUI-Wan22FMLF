@@ -39,7 +39,7 @@ class WanAdvancedI2V(io.ComfyNode):
                 io.Float.Input("middle_frame_ratio", default=0.5, min=0.0, max=1.0, step=0.01, round=0.01, display_mode=io.NumberDisplay.slider, optional=True),
                 io.Image.Input("motion_frames", optional=True),
                 io.Int.Input("video_frame_offset", default=0, min=0, max=1000000, step=1, display_mode=io.NumberDisplay.number, optional=True),
-                io.Combo.Input("long_video_mode", ["DISABLED", "AUTO_CONTINUE", "SVI"], default="DISABLED", optional=True),
+                io.Combo.Input("long_video_mode", ["DISABLED", "AUTO_CONTINUE", "SVI", "LATENT_CONTINUE"], default="DISABLED", optional=True),
                 io.Int.Input("continue_frames_count", default=5, min=0, max=20, step=1, display_mode=io.NumberDisplay.number, optional=True),
                 io.Float.Input("high_noise_start_strength", default=1.0, min=0.0, max=1.0, step=0.05, round=0.01, display_mode=io.NumberDisplay.slider, optional=True),
                 io.Float.Input("high_noise_mid_strength", default=0.8, min=0.0, max=1.0, step=0.05, round=0.01, display_mode=io.NumberDisplay.slider, optional=True),
@@ -152,6 +152,21 @@ class WanAdvancedI2V(io.ComfyNode):
         mask_low_noise = mask_base.clone()
         
         svi_continue_mode = False
+
+        # --- Latent Continue Mode Logic ---
+        if long_video_mode == 'LATENT_CONTINUE':
+            # When prev_latent is provided, inject last latent and lock it
+            has_prev_latent = (prev_latent is not None and prev_latent.get("samples") is not None)
+            if has_prev_latent:
+                prev_samples = prev_latent["samples"]
+                # Inject last latent from prev_latent into first position of current latent
+                if prev_samples.shape[2] > 0:
+                    for b in range(batch_size):
+                        latent[b:b+1, :, 0:1, :, :] = prev_samples[:, :, -1:].clone()  # Use last latent from prev as first
+                    # Lock first latent (mask = 0.0)
+                    mask_high_noise[:, :, :4] = 0.0
+                    mask_low_noise[:, :, :4] = 0.0
+        # --- End of Latent Continue Mode Logic ---
 
         # --- SVI Mode Logic ---
         if long_video_mode == 'SVI':
@@ -361,7 +376,7 @@ class WanAdvancedI2V(io.ComfyNode):
         # --- End of SVI Mode Logic ---
 
         # Original logic for other modes (AUTO_CONTINUE, NORMAL)
-        if has_motion_frames and long_video_mode != 'SVI':
+        if has_motion_frames and long_video_mode != 'SVI' and long_video_mode != 'LATENT_CONTINUE':
             image[:motion_frames.shape[0]] = motion_frames[:, :, :, :3]
             
             motion_latent_frames = ((motion_frames.shape[0] - 1) // 4) + 1
