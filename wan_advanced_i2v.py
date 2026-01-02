@@ -169,10 +169,29 @@ class WanAdvancedI2V(io.ComfyNode):
                     
                     # Decode last latent to image and inject into condition
                     last_latent = prev_samples[:, :, -1:].clone()
-                    last_image = vae.decode(last_latent)
-                    # Inject decoded image into first frame of image for conditioning
-                    if last_image.shape[0] > 0:
-                        image[0:1] = last_image[0:1, :, :, :3]
+                    # vae.decode expects a dict with "samples" key
+                    last_latent_dict = {"samples": last_latent}
+                    last_image = vae.decode(last_latent_dict)
+                    # vae.decode returns [batch, channels, height, width], convert to [batch, height, width, channels]
+                    if last_image is not None:
+                        # Ensure we have the right shape: [batch, height, width, channels]
+                        if len(last_image.shape) == 4:
+                            # [batch, channels, height, width] -> [batch, height, width, channels]
+                            if last_image.shape[1] == 3:
+                                last_image = last_image.movedim(1, -1)
+                            elif last_image.shape[-1] == 3:
+                                # Already in [batch, height, width, channels] format
+                                pass
+                        elif len(last_image.shape) == 3:
+                            # [height, width, channels] -> [1, height, width, channels]
+                            if last_image.shape[-1] == 3:
+                                last_image = last_image.unsqueeze(0)
+                            else:
+                                # [channels, height, width] -> [1, height, width, channels]
+                                last_image = last_image.movedim(0, -1).unsqueeze(0)
+                        
+                        if last_image.shape[0] > 0 and last_image.shape[-1] >= 3:
+                            image[0:1] = last_image[0:1, :, :, :3]
         # --- End of Latent Continue Mode Logic ---
 
         # --- SVI Mode Logic ---
