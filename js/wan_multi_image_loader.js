@@ -31,7 +31,6 @@ class WanMultiImageGallery {
 
         this.root = this._buildRootDOM();
         this._bindIndexWidget();
-        this._scheduleInitialLoad();
     }
 
     _buildRootDOM() {
@@ -188,9 +187,7 @@ class WanMultiImageGallery {
         };
     }
 
-    _scheduleInitialLoad() {
-        setTimeout(() => this._initializeFromWidget(), INIT_DELAY);
-    }
+
 
     _parseWidgetValue() {
         const v = this.imagesDataWidget.value;
@@ -680,6 +677,12 @@ app.registerExtension({
             this.onRemoved = function () {
                 self.__wanGallery?.destroy();
                 origOnRemoved?.call(self);
+            };
+
+            const origOnConfigure = this.onConfigure;
+            this.onConfigure = function (o) {
+                origOnConfigure?.apply(this, arguments);
+                self.__wanGallery?._initializeFromWidget();
             };
 
             patchQueuePrompt();
