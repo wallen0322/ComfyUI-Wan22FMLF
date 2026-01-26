@@ -10,6 +10,8 @@
 
 如果要用首尾帧，长度必须81，否则需要抽卡才能避免闪烁
 
+增加start image的强度可以削弱动态
+
 # 下面为原版fmlf的readme：
 > Multi-frame reference conditioning nodes for Wan2.2 A14B I2V models.
 
