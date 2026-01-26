@@ -1,5 +1,15 @@
-# ComfyUI-Wan22FMLF
+# ComfyUI-Wan22FMLF-svi-fix
 
+对比原版，修复了svi模式下拼接方向问题和svi支持的完整性问题
+
+引入三个参考帧开关和svi_motion_strength来控制传递的动态强度，可以实现非常夸张或者非常稳定的动态效果
+
+
+具体使用方式请移步example workflow
+
+
+
+# 下面为原版fmlf的readme：
 > Multi-frame reference conditioning nodes for Wan2.2 A14B I2V models.
 
 一个为 Wan2.2 A14B I2V 模型提供多帧参考条件控制的 ComfyUI 自定义节点集合。
