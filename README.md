@@ -4,6 +4,7 @@
 
 引入三个参考帧开关和svi_motion_strength来控制传递的动态强度，可以实现非常夸张或者非常稳定的动态效果
 
+拼接输入时需要start image作为全局锚点帧以及上一段跑完的latent
 
 具体使用方式请移步example workflow
 
