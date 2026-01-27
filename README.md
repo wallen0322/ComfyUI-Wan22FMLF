@@ -19,13 +19,23 @@
 
 ## 📝 更新日志
 
-### 2025-01-27 SVI 模式 Bug 修复
+### 2025-01-27 SVI 模式增强
 
 - ✅ **修复 SVI 模式 mask 维度问题**
   - 修复 `concat_mask` 维度从 `(1, 1, T, H, W)` 到 `(1, 4, T, H, W)`
   - 与 non-SVI 模式格式保持一致，解决拼接方向错误
 
-**感谢**：[@a1010580415-commits](https://github.com/a1010580415-commits) 在 [PR #29](https://github.com/wallen0322/ComfyUI-Wan22FMLF/pull/29) 中发现并报告此问题
+- ✅ **新增 `svi_motion_strength` 参数**
+  - 控制 SVI 模式下的动态传递强度
+  - 参数范围：0.0-2.0，默认 1.0
+  - `<1.0` = 更稳定的效果，`>1.0` = 更夸张的动态效果
+
+- ✅ **新增三个参考帧开关**
+  - `enable_start_frame`：控制是否启用起始帧参考
+  - `enable_middle_frame`：控制是否启用中间帧参考（已有）
+  - `enable_end_frame`：控制是否启用结束帧参考
+
+**感谢**：[@a1010580415-commits](https://github.com/a1010580415-commits) 在 [PR #29](https://github.com/wallen0322/ComfyUI-Wan22FMLF/pull/29) 中的贡献和建议
 
 ---
 
