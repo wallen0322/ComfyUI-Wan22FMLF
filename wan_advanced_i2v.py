@@ -234,9 +234,10 @@ class WanAdvancedI2V(io.ComfyNode):
                     image_cond_latent[:, :, end_latent_idx:end_latent_idx+1] = end_latent
                 
                 # Create masks with strength parameters
-                mask_svi_high = torch.ones((1, 1, total_latents, H, W), 
+                # Fixed: mask shape should be (1, 4, T, H, W) to match non-SVI mode format
+                mask_svi_high = torch.ones((1, 4, total_latents, H, W), 
                                           device=device, dtype=anchor_latent.dtype)
-                mask_svi_low = torch.ones((1, 1, total_latents, H, W), 
+                mask_svi_low = torch.ones((1, 4, total_latents, H, W), 
                                          device=device, dtype=anchor_latent.dtype)
                 
                 # Start frame: apply strength
@@ -320,9 +321,10 @@ class WanAdvancedI2V(io.ComfyNode):
                     image_cond_latent[:, :, end_latent_idx:end_latent_idx+1] = end_latent
                 
                 # Create masks with strength parameters
-                mask_svi_high = torch.ones((1, 1, total_latents, H, W), 
+                # Fixed: mask shape should be (1, 4, T, H, W) to match non-SVI mode format
+                mask_svi_high = torch.ones((1, 4, total_latents, H, W), 
                                           device=device, dtype=anchor_latent.dtype)
-                mask_svi_low = torch.ones((1, 1, total_latents, H, W), 
+                mask_svi_low = torch.ones((1, 4, total_latents, H, W), 
                                          device=device, dtype=anchor_latent.dtype)
                 
                 # Start frame: apply strength

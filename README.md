@@ -19,6 +19,16 @@
 
 ## 📝 更新日志
 
+### 2025-01-27 SVI 模式 Bug 修复
+
+- ✅ **修复 SVI 模式 mask 维度问题**
+  - 修复 `concat_mask` 维度从 `(1, 1, T, H, W)` 到 `(1, 4, T, H, W)`
+  - 与 non-SVI 模式格式保持一致，解决拼接方向错误
+
+**感谢**：[@a1010580415-commits](https://github.com/a1010580415-commits) 在 [PR #29](https://github.com/wallen0322/ComfyUI-Wan22FMLF/pull/29) 中发现并报告此问题
+
+---
+
 ### SVI PRO - 连续性优化
 
 **SVI 项目地址**：https://github.com/vita-epfl/Stable-Video-Infinity
