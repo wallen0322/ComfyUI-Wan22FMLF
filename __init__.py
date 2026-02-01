@@ -8,7 +8,8 @@ Nodes:
 2. WanMultiFrameRefToVideo - N-frame universal reference node
 3. WanFourFrameReferenceUltimate - 4-frame reference with adjustable placeholder
 4. WanAdvancedI2V - Ultimate unified node with all features (includes automatic chaining)
-5. WanMultiImageLoader - Load multiple images with UI for batch selection and preview
+5. WanSVIProAdvancedI2V - SVI Pro Advanced node for seamless continuation
+6. WanMultiImageLoader - Load multiple images with UI for batch selection and preview
 """
 
 from typing_extensions import override
@@ -22,6 +23,7 @@ WEB_DIRECTORY = "./js"
 
 HAS_4FRAME = False
 HAS_ADVANCED = False
+HAS_SVI_PRO_ADVANCED = False
 
 try:
     from .wan_4_frame_ultimate import WanFourFrameReferenceUltimate
@@ -38,6 +40,12 @@ try:
     HAS_ADVANCED = True
 except ImportError:
     print("wan_advanced_i2v.py not found")
+
+try:
+    from .wan_svi_pro_advanced import WanSVIProAdvancedI2V
+    HAS_SVI_PRO_ADVANCED = True
+except ImportError:
+    print("wan_svi_pro_advanced.py not found")
 
 
 class WanVideoExtension(ComfyExtension):
@@ -58,6 +66,9 @@ class WanVideoExtension(ComfyExtension):
                 WanAdvancedExtractLastFrames,
                 WanAdvancedExtractLastImages,
             ])
+        
+        if HAS_SVI_PRO_ADVANCED:
+            nodes.append(WanSVIProAdvancedI2V)
         
         return nodes
 
