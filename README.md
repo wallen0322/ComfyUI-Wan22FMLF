@@ -1,4 +1,18 @@
-# ComfyUI-Wan22FMLF
+# ComfyUI-Wan22FMLF_svi-fix
+
+## 📝 更新日志 (svi-fix)
+
+### 2025-02-01 SVI 新增节点
+
+新增svipro专用节点wan_svi_pro_advanced.py
+
+已验证：新增两个动态增强算法解决高分辨率下动态削弱问题，并且可以自由调整强度
+
+未验证：动态增强后拼接是否无缝？
+
+
+---
+
 
 > Multi-frame reference conditioning nodes for Wan2.2 A14B I2V models.
 
