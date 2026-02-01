@@ -6,7 +6,7 @@
 
 新增svipro专用节点wan_svi_pro_advanced.py
 
-用于解决如下问题：高分辨率下svi动态削弱，拼接不完全无缝，以及界面整洁度
+用于解决如下问题：高分辨率下svi动态削弱，拼接处跳帧，以及界面整洁度
 
 #### 测试结论：在示例工作流的参数下，1280x1280的分辨率也可以保持住动态。
 <img width="13031" height="4457" alt="workflow (82)" src="https://github.com/user-attachments/assets/73ce87c5-9d49-4c04-a021-5cda89e7010f" />
