@@ -7,14 +7,21 @@
 新增svipro专用节点wan_svi_pro_advanced.py
 
 用于解决如下问题：高分辨率下svi动态削弱，拼接不完全无缝，以及界面整洁度
+<img width="13031" height="4457" alt="workflow (82)" src="https://github.com/user-attachments/assets/73ce87c5-9d49-4c04-a021-5cda89e7010f" />
 
-已验证：新增两个动态增强算法解决高分辨率下动态削弱问题，并且可以自由调整强度
+（附示例工作流截图)
 
-未验证：动态增强后拼接是否无缝？
+#### 新参数：
 
-测试没问题了便上传示例工作流
+motion influence ：用于控制动态权重，默认1  （为了保持动态：低分辨率建议调高，高分辨率建议调低）
 
+overlap frames:提供给motion inluence的图像帧（=latent帧x4）
 
+motion boost：提高动态，增加动作幅度。 原理：计算连续帧之间的差异，放大运动向量
+
+detail boost：提高速度和细节，但是可能会让画面不稳定。 原理：在创建掩码和条件时，调整衰减率和使用的帧数
+
+具体使用参考请见svipro boost示例工作流里的提示
 ---
 
 
