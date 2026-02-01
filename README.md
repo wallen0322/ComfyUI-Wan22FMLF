@@ -17,11 +17,11 @@
 
 motion influence ：用于控制动态权重，默认1  （为了保持动态：低分辨率建议调高，高分辨率建议调低）
 
-overlap frames:提供给motion inluence的图像帧（=latent帧x4）
+overlap frames : 提供给motion inluence的图像帧（=latent帧x4）
 
-motion boost：提高动态，增加动作幅度。 原理：计算连续帧之间的差异，放大运动向量
+motion boost ：提高动态，增加动作幅度。 原理：计算连续帧之间的差异，放大运动向量
 
-detail boost：提高速度和细节，但是可能会让画面不稳定。 原理：在创建掩码和条件时，调整衰减率和使用的帧数
+detail boost ：提高速度和细节，但是可能会让画面不稳定。 原理：在创建掩码和条件时，调整衰减率和使用的帧数
 
 具体使用参考请见svipro boost示例工作流里的提示
 ---
