@@ -15,7 +15,7 @@
 
 #### 新参数：
 
-motion influence ：用于控制动态权重，默认1  （为了保持动态：低分辨率建议调高，高分辨率建议调低）
+motion influence ：用于控制传递下来的动态权重，默认1  （为了保持动态：低分辨率建议调高，高分辨率建议调低）
 
 overlap frames : 提供给motion inluence的图像帧（=latent帧x4）
 
