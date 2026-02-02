@@ -25,6 +25,7 @@ class WanSVIProAdvancedI2V(io.ComfyNode):
             display_name="Wan SVI Pro Advanced I2V",
             category="ComfyUI-Wan22FMLF",
             inputs=[
+                # 基础参数
                 io.Conditioning.Input("positive"),
                 io.Conditioning.Input("negative"),
                 io.Vae.Input("vae"),
@@ -36,59 +37,67 @@ class WanSVIProAdvancedI2V(io.ComfyNode):
                            tooltip="Total number of frames in the generated video"),
                 io.Int.Input("batch_size", default=1, min=1, max=4096, display_mode=io.NumberDisplay.number,
                            tooltip="Batch size (number of videos to generate)"),
-                io.Image.Input("start_image", optional=True,
-                             tooltip="First frame reference image (anchor for the video)"),
-                io.Image.Input("middle_image", optional=True,
-                             tooltip="Middle frame reference image for better consistency"),
-                io.Image.Input("end_image", optional=True,
-                             tooltip="Last frame reference image (target ending)"),
-                io.Float.Input("middle_frame_ratio", default=0.5, min=0.0, max=1.0, step=0.01, round=0.01, 
-                             display_mode=io.NumberDisplay.slider, optional=True,
-                             tooltip="Position of middle frame (0=start, 1=end)"),
-                io.Latent.Input("prev_latent", optional=True,
-                              tooltip="Previous video latent for seamless continuation"),
-                # 动作幅度参数 - 真正放大运动向量
-                io.Float.Input("motion_amplification", default=1.0, min=0.5, max=3.0, step=0.1, round=0.1,
+                
+                # 动态调整参数
+                io.Float.Input("motion_boost", default=1.0, min=0.5, max=3.0, step=0.1, round=0.1,
                              display_mode=io.NumberDisplay.slider, optional=True,
                              tooltip="Motion amplitude amplification\n<1.0: Reduce movement amplitude\n1.0: Normal (default)\n>1.0: Amplify movement amplitude\nFor bigger actions like punches, slaps, large gestures"),
-                # 动态强度参数 - 提高上限到4.0以适应高分辨率
-                io.Float.Input("dynamic_strength", default=1.0, min=0.5, max=4.0, step=0.1, round=0.1,
+                io.Float.Input("detail_boost", default=1.0, min=0.5, max=4.0, step=0.1, round=0.1,
                              display_mode=io.NumberDisplay.slider, optional=True,
                              tooltip="Motion dynamic strength\n0.5-0.8: Smooth transitions (continuity first)\n1.0: Balanced (default)\n1.2-1.5: Dynamic motion priority\n1.6-2.5: Strong motion for HD/720p+\n2.6-4.0: Very strong motion for 1080p+/high-res"),
-                # 使用像素帧数（4的倍数），最小4，对应1个潜变量帧
-                io.Int.Input("overlap_frames", default=4, min=4, max=128, step=4, display_mode=io.NumberDisplay.number,
-                           tooltip="Number of overlapping frames (pixel frames)\nMust be multiple of 4 (4 pixel frames = 1 latent frame)\nControls how much to continue from previous video"),
                 io.Float.Input("motion_influence", default=1.0, min=0.0, max=2.0, step=0.05, round=0.01, 
                              display_mode=io.NumberDisplay.slider,
                              tooltip="Influence strength of motion latent from previous video\n1.0 = normal, <1.0 = weaker, >1.0 = stronger"),
+                
+                # 重叠帧参数
+                io.Int.Input("overlap_frames", default=4, min=4, max=128, step=4, display_mode=io.NumberDisplay.number,
+                           tooltip="Number of overlapping frames (pixel frames)\nMust be multiple of 4 (4 pixel frames = 1 latent frame)\nControls how much to continue from previous video"),
+                
+                # 起始帧组
+                io.Image.Input("start_image", optional=True,
+                             tooltip="First frame reference image (anchor for the video)"),
+                io.Boolean.Input("enable_start_frame", default=True, optional=True,
+                               tooltip="Enable start frame conditioning"),
                 io.Float.Input("high_noise_start_strength", default=1.0, min=0.0, max=1.0, step=0.05, round=0.01, 
                              display_mode=io.NumberDisplay.slider, optional=True,
                              tooltip="Conditioning strength for start frame in high-noise stage\n0.0 = no conditioning, 1.0 = full conditioning"),
-                io.Float.Input("high_noise_mid_strength", default=0.8, min=0.0, max=1.0, step=0.05, round=0.01, 
-                             display_mode=io.NumberDisplay.slider, optional=True,
-                             tooltip="Conditioning strength for middle frame in high-noise stage"),
                 io.Float.Input("low_noise_start_strength", default=1.0, min=0.0, max=1.0, step=0.05, round=0.01, 
                              display_mode=io.NumberDisplay.slider, optional=True,
                              tooltip="Conditioning strength for start frame in low-noise stage"),
+                
+                # 中间帧组
+                io.Image.Input("middle_image", optional=True,
+                             tooltip="Middle frame reference image for better consistency"),
+                io.Boolean.Input("enable_middle_frame", default=True, optional=True,
+                               tooltip="Enable middle frame conditioning"),
+                io.Float.Input("middle_frame_ratio", default=0.5, min=0.0, max=1.0, step=0.01, round=0.01, 
+                             display_mode=io.NumberDisplay.slider, optional=True,
+                             tooltip="Position of middle frame (0=start, 1=end)"),
+                io.Float.Input("high_noise_mid_strength", default=0.8, min=0.0, max=1.0, step=0.05, round=0.01, 
+                             display_mode=io.NumberDisplay.slider, optional=True,
+                             tooltip="Conditioning strength for middle frame in high-noise stage"),
                 io.Float.Input("low_noise_mid_strength", default=0.2, min=0.0, max=1.0, step=0.05, round=0.01, 
                              display_mode=io.NumberDisplay.slider, optional=True,
                              tooltip="Conditioning strength for middle frame in low-noise stage"),
+                
+                # 结束帧组
+                io.Image.Input("end_image", optional=True,
+                             tooltip="Last frame reference image (target ending)"),
+                io.Boolean.Input("enable_end_frame", default=True, optional=True,
+                               tooltip="Enable end frame conditioning"),
                 io.Float.Input("low_noise_end_strength", default=1.0, min=0.0, max=1.0, step=0.05, round=0.01, 
                              display_mode=io.NumberDisplay.slider, optional=True,
                              tooltip="Conditioning strength for end frame in low-noise stage"),
+                
+                # 其他参数
                 io.ClipVisionOutput.Input("clip_vision_start_image", optional=True,
                                         tooltip="CLIP vision embedding for start frame (for better semantic consistency)"),
                 io.ClipVisionOutput.Input("clip_vision_middle_image", optional=True,
                                         tooltip="CLIP vision embedding for middle frame"),
                 io.ClipVisionOutput.Input("clip_vision_end_image", optional=True,
                                         tooltip="CLIP vision embedding for end frame"),
-                io.Boolean.Input("enable_start_frame", default=True, optional=True,
-                               tooltip="Enable start frame conditioning"),
-                io.Boolean.Input("enable_middle_frame", default=True, optional=True,
-                               tooltip="Enable middle frame conditioning"),
-                io.Boolean.Input("enable_end_frame", default=True, optional=True,
-                               tooltip="Enable end frame conditioning"),
-                # video_frame_offset酌情保留，但默认禁用
+                io.Latent.Input("prev_latent", optional=True,
+                              tooltip="Previous video latent for seamless continuation"),
                 io.Int.Input("video_frame_offset", default=0, min=0, max=1000000, step=1, display_mode=io.NumberDisplay.number, 
                            optional=True, tooltip="Video frame offset (advanced, usually set to 0)\nSkip this many frames from input images"),
             ],
@@ -105,14 +114,19 @@ class WanSVIProAdvancedI2V(io.ComfyNode):
 
     @classmethod
     def execute(cls, positive, negative, vae, width, height, length, batch_size,
-                start_image=None, middle_image=None, end_image=None,
-                middle_frame_ratio=0.5, prev_latent=None,
-                motion_amplification=1.0, dynamic_strength=1.0, overlap_frames=4, motion_influence=1.0,
-                high_noise_start_strength=1.0, high_noise_mid_strength=0.8,
-                low_noise_start_strength=1.0, low_noise_mid_strength=0.2, low_noise_end_strength=1.0,
+                motion_boost=1.0, detail_boost=1.0, motion_influence=1.0,
+                overlap_frames=4,
+                start_image=None, enable_start_frame=True,
+                high_noise_start_strength=1.0, low_noise_start_strength=1.0,
+                middle_image=None, enable_middle_frame=True, middle_frame_ratio=0.5,
+                high_noise_mid_strength=0.8, low_noise_mid_strength=0.2,
+                end_image=None, enable_end_frame=True, low_noise_end_strength=1.0,
                 clip_vision_start_image=None, clip_vision_middle_image=None,
-                clip_vision_end_image=None, enable_start_frame=True, enable_middle_frame=True,
-                enable_end_frame=True, video_frame_offset=0):
+                clip_vision_end_image=None, prev_latent=None, video_frame_offset=0):
+        
+        # 重命名变量以保持代码一致性
+        motion_amplification = motion_boost
+        dynamic_strength = detail_boost
         
         # 计算基本参数
         spatial_scale = vae.spacial_compression_encode()
@@ -346,6 +360,7 @@ class WanSVIProAdvancedI2V(io.ComfyNode):
             
             # 结束帧：使用指定强度
             if end_image is not None and enable_end_frame:
+                # 注意：结束帧在高噪声阶段完全使用（掩码为0.0）
                 mask_high[:, :, total_latents-1:total_latents] = 0.0  # 完全使用结束帧
                 mask_low[:, :, total_latents-1:total_latents] = max(
                     0.0, 1.0 - low_noise_end_strength
@@ -436,6 +451,7 @@ class WanSVIProAdvancedI2V(io.ComfyNode):
             
             # 应用结束帧强度
             if end_image is not None and enable_end_frame:
+                # 注意：结束帧在高噪声阶段完全使用（掩码为0.0）
                 mask_high[:, :, total_latents-1:total_latents] = 0.0
                 mask_low[:, :, total_latents-1:total_latents] = max(
                     0.0, 1.0 - low_noise_end_strength
