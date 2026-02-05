@@ -23,6 +23,11 @@ motion boost ：提高动态，增加动作幅度。 `原理：计算连续帧�
 
 detail boost ：提高速度和细节，但是可能会让画面不稳定。 `原理：在创建掩码和条件时，调整衰减率和使用的帧数`
 
+搭配1：高传递高动态，motion influence 2 overlap frames 16 motion boost 1 detail boost 0.5 ， 视频17帧重叠可无缝
+
+
+搭配2：低传递高动态，motion influence 0.7 overlap frames 4 motion boost 2.5 detail boost 3.0  视频5帧重叠可无缝
+
 具体使用方式，请见svipro boost工作流示例
 ---
 
