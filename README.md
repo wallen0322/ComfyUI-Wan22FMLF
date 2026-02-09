@@ -1,36 +1,4 @@
-# ComfyUI-Wan22FMLF_svi-fix
-
-## 📝 更新日志 (svi-fix)
-
-### 2025-02-01 SVI 新增节点
-
-新增svipro专用节点wan_svi_pro_advanced.py
-
-用于解决如下问题：高分辨率下svi动态削弱，拼接处跳帧，以及界面整洁度
-
-#### 测试结论：在示例工作流的参数下，1920x1080的分辨率也可以保持住动态。
-<img width="13031" height="4457" alt="workflow (82)" src="https://github.com/user-attachments/assets/73ce87c5-9d49-4c04-a021-5cda89e7010f" />
-
-（附示例工作流截图)
-
-#### 新参数：
-
-motion influence ：用于控制传递下来的动态权重，默认1  （为了保持动态：低分辨率建议调高，高分辨率建议调低）
-
-overlap frames : 提供给motion inluence的图像帧数量（=latent帧x4）
-
-motion boost ：提高动态，增加动作幅度。 `原理：计算连续帧之间的差异，放大运动向量`
-
-detail boost ：提高速度和细节，但是可能会让画面不稳定。 `原理：在创建掩码和条件时，调整衰减率和使用的帧数`
-
-搭配1：高传递高动态，motion influence 2 overlap frames 16 motion boost 1 detail boost 0.5 ， 视频17帧重叠可无缝
-
-
-搭配2：低传递高动态，motion influence 0.7 overlap frames 4 motion boost 2.5 detail boost 3.0  视频5帧重叠可无缝
-
-具体使用方式，请见svipro boost工作流示例
----
-
+# ComfyUI-Wan22FMLF
 
 > Multi-frame reference conditioning nodes for Wan2.2 A14B I2V models.
 
@@ -88,6 +56,25 @@ detail boost ：提高速度和细节，但是可能会让画面不稳定。 `�
 **修复问题**：
 - 修复多次采样时帧间不连续的问题
 - 优化 latent 和条件注入的时机
+
+---
+
+### SVI Pro Advanced 节点 (NEW)
+
+**专为高分辨率无缝衔接优化的节点**
+
+- ✅ 高分辨率（如1920x1080）下 SVI 动态削弱问题
+- ✅ 视频段拼接处跳帧问题
+- ✅ 简化用户界面
+
+| 参数 | 默认值 | 说明 |
+|------|--------|------|
+| `motion_influence` | 1.0 | 动态传递权重 |
+| `overlap_frames` | 4 | 重叠帧数 |
+| `motion_boost` | 1.0 | 动作幅度放大 |
+| `detail_boost` | 1.0 | 动态速度增强 |
+
+**感谢**：[@a1010580415-commits](https://github.com/a1010580415-commits) 在 [PR #30](https://github.com/wallen0322/ComfyUI-Wan22FMLF/pull/30) 中的贡献
 
 ---
 
